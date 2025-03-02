@@ -1,7 +1,7 @@
 {
   "name": "SyncFiles",
   "displayName": "SyncFiles",
-  "publisher": "sammmiler",
+  "publisher": "sammiller",
   "description": "Sync with git",
   "version": "0.0.1",
   "engines": {
@@ -10,7 +10,7 @@
   "icon": "media/sync.png",
   "repository": {
     "type": "git",
-    "url": "git://github.com/sammmiler/SyncFiles.git"
+    "url": "git://github.com/sammiler/SyncFiles.git"
   },
   "categories": [
     "Other"
