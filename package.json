@@ -7,65 +7,69 @@
   "engines": {
     "vscode": "^1.97.0"
   },
+  "icon": "media/sync.png",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/sammmiler/SyncFiles.git"
+  },
   "categories": [
     "Other"
   ],
-"activationEvents": [
+  "activationEvents": [
     "onView:syncView"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
-        "activitybar": [
-            {
-                "id": "sync-container",
-                "title": "SyncFiles",
-                "icon": "media/icon.svg"
-            }
-        ]
+      "activitybar": [
+        {
+          "id": "sync-container",
+          "title": "SyncFiles",
+          "icon": "media/icon.svg"
+        }
+      ]
     },
     "views": {
-        "sync-container": [
-            {
-                "id": "syncView",
-                "name": "Sync Control"
-            }
-        ]
+      "sync-container": [
+        {
+          "id": "syncView",
+          "name": "Sync Control"
+        }
+      ]
     },
     "commands": [
-        {
-            "command": "vscode.sync",
-            "title": "Start Sync"
-        }
+      {
+        "command": "vscode.sync",
+        "title": "Start Sync"
+      }
     ],
     "configuration": {
-        "title": "SyncFiles",
-        "properties": {
-            "syncFiles.map": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "sourceUrl": {
-                            "type": "string",
-                            "description": "GitHub 文件的 Raw URL 或目录的 Tree URL（例如 https://raw.githubusercontent.com/... 或 https://github.com/.../tree/...）"
-                        },
-                        "targetPath": {
-                            "type": "string",
-                            "description": "保存到项目中的相对路径（相对于工作区根目录）"
-                        }
-                    },
-                    "required": [
-                        "sourceUrl",
-                        "targetPath"
-                    ]
-                },
-                "description": "GitHub 文件或目录 URL 和目标路径的映射列表（必须在设置中配置，无默认值）"
-            }
+      "title": "SyncFiles",
+      "properties": {
+        "syncFiles.map": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sourceUrl": {
+                "type": "string",
+                "description": "GitHub 文件的 Raw URL 或目录的 Tree URL（例如 https://raw.githubusercontent.com/... 或 https://github.com/.../tree/...）"
+              },
+              "targetPath": {
+                "type": "string",
+                "description": "保存到项目中的相对路径（相对于工作区根目录）"
+              }
+            },
+            "required": [
+              "sourceUrl",
+              "targetPath"
+            ]
+          },
+          "description": "GitHub 文件或目录 URL 和目标路径的映射列表（必须在设置中配置，无默认值）"
         }
+      }
     }
-},
-
+  },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
@@ -76,16 +80,16 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.10"
-},
+  },
   "devDependencies": {
-    "@types/vscode": "^1.97.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
+    "@types/vscode": "^1.97.0",
     "@typescript-eslint/eslint-plugin": "^8.22.0",
     "@typescript-eslint/parser": "^8.22.0",
-    "eslint": "^9.19.0",
-    "typescript": "^5.7.3",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.19.0",
+    "typescript": "^5.7.3"
   }
 }
