@@ -1,0 +1,91 @@
+{
+  "name": "SyncFiles",
+  "displayName": "SyncFiles",
+  "publisher": "sammmiler",
+  "description": "Sync with git",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.97.0"
+  },
+  "categories": [
+    "Other"
+  ],
+"activationEvents": [
+    "onView:syncView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+        "activitybar": [
+            {
+                "id": "sync-container",
+                "title": "SyncFiles",
+                "icon": "media/icon.svg"
+            }
+        ]
+    },
+    "views": {
+        "sync-container": [
+            {
+                "id": "syncView",
+                "name": "Sync Control"
+            }
+        ]
+    },
+    "commands": [
+        {
+            "command": "vscode.sync",
+            "title": "Start Sync"
+        }
+    ],
+    "configuration": {
+        "title": "SyncFiles",
+        "properties": {
+            "syncFiles.map": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "sourceUrl": {
+                            "type": "string",
+                            "description": "GitHub 文件的 Raw URL 或目录的 Tree URL（例如 https://raw.githubusercontent.com/... 或 https://github.com/.../tree/...）"
+                        },
+                        "targetPath": {
+                            "type": "string",
+                            "description": "保存到项目中的相对路径（相对于工作区根目录）"
+                        }
+                    },
+                    "required": [
+                        "sourceUrl",
+                        "targetPath"
+                    ]
+                },
+                "description": "GitHub 文件或目录 URL 和目标路径的映射列表（必须在设置中配置，无默认值）"
+            }
+        }
+    }
+},
+
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.10"
+},
+  "devDependencies": {
+    "@types/vscode": "^1.97.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "eslint": "^9.19.0",
+    "typescript": "^5.7.3",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1"
+  }
+}
