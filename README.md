@@ -38,11 +38,11 @@
 3. **自动配置**：
    - 如果 `.vscode/settings.json` 不存在，SyncFiles 会创建它并写入默认配置：
      ```json
-     {
-       "fetchVscodeRepo.mappings": [
-         {
-           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode",
-           "targetPath": ".vscode"
-         }
-       ]
-     }
+  {
+    "syncFiles.map": [
+      {
+        "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode",
+        "targetPath": ".vscode"
+      }
+    ]
+  }
