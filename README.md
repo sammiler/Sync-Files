@@ -37,13 +37,12 @@
    - 在 “Sync Control” 视图中，点击 “Start Sync” 按钮。
 3. **自动配置**：
    - 如果 `.vscode/settings.json` 不存在，SyncFiles 会创建它并写入默认配置：
-'''json
-{
-    "syncFiles.map": [
-        {
-            "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode/MinGW",
-            "targetPath": ".vscode"
-        }
-    ]
-}
-'''
+     ```json
+     {
+       "syncFiles.map": [
+         {
+           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode/MinGW",
+           "targetPath": ".vscode"
+         }
+       ]
+     }
