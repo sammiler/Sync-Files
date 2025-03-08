@@ -3,7 +3,7 @@
   "displayName": "SyncFiles",
   "publisher": "sammiller",
   "description": "Sync with git",
-  "version": "0.0.3",
+  "version": "1.0.3",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -79,7 +79,8 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "adm-zip": "^0.5.10"
+    "adm-zip": "^0.5.10",
+    "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

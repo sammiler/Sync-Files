@@ -9,32 +9,53 @@ interface Mapping {
     sourceUrl: string;
     targetPath: string;
 }
-// 异步检查和创建 settings.json
+
+import { parse } from 'jsonc-parser';
+
 const ensureSettingsFile = async (workspacePath: string): Promise<void> => {
     const settingsPath = path.join(workspacePath, '.vscode', 'settings.json');
     console.log(`检查文件路径: ${settingsPath}`);
 
-    if (!fs.existsSync(settingsPath)) {
-          console.log(`未找到 ${settingsPath}，创建并设置初始值`);
-        const initialSettings = {
-            "syncFiles.map": [
-                {
-                    "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode",
-                    "targetPath": ".vscode"
-                }
-            ]
-        };
-        const settingsContent = JSON.stringify(initialSettings, null, 2);
+    const initialSettings = {
+        "syncFiles.map": [
+            {
+                "sourceUrl": "",
+                "targetPath": ".vscode"
+            }
+        ]
+    };
 
-        try {
+    try {
+        let existingSettings: { [key: string]: any } = {};
+        if (fs.existsSync(settingsPath)) {
+            console.log(`发现已有的 ${settingsPath}`);
+            const content = await fs.promises.readFile(settingsPath, 'utf8');
+            existingSettings = parse(content); // 用 jsonc-parser 解析
+            if (!existingSettings["syncFiles.map"]) {
+                console.log('无 syncFiles.map，添加默认值');
+                existingSettings["syncFiles.map"] = initialSettings["syncFiles.map"];
+                const settingsContent = JSON.stringify(existingSettings, null, 2);
+                await fs.promises.writeFile(settingsPath, settingsContent, 'utf8');
+                await vscode.workspace.getConfiguration().update('syncFiles.map', existingSettings["syncFiles.map"], vscode.ConfigurationTarget.Workspace);
+                console.log(`已更新 ${settingsPath}`);
+            } else {
+                console.log('syncFiles.map 已存在，跳过');
+            }
+        } else {
+            console.log(`未找到 ${settingsPath}，创建新文件`);
             fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+            const settingsContent = JSON.stringify(initialSettings, null, 2);
             await fs.promises.writeFile(settingsPath, settingsContent, 'utf8');
             await vscode.workspace.getConfiguration().update('syncFiles.map', initialSettings["syncFiles.map"], vscode.ConfigurationTarget.Workspace);
-        } catch (err) {
-            throw err; // 抛出错误以便调试
+            console.log(`已更新 ${settingsPath}`);
         }
+    } catch (err) {
+        console.error(`更新 ${settingsPath} 失败:`, err);
+        throw err;
     }
 };
+
+export { ensureSettingsFile };
 // 视图提供者类
 class FetchVscodeRepoViewProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
