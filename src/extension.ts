@@ -210,7 +210,8 @@ export function activate(context: vscode.ExtensionContext) {
         }).then(() => {
             const zip = new AdmZip(zipPath);
             const extractRoot = zip.getEntries()[0].entryName.split('/')[0];
-            const relativeDir = dirPath.replace(/.*\/tree\/[^\/]+\//, '');
+            const decodedPath = decodeURIComponent(dirPath);
+            const relativeDir = decodedPath.replace(/.*\/tree\/[^\/]+\//, '');
             const tempExtractPath = path.join(workspacePath, 'temp-extract');
             zip.extractAllTo(tempExtractPath, true);
             const sourceDir = path.join(tempExtractPath, extractRoot, relativeDir);
