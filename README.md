@@ -41,7 +41,7 @@
      {
        "syncFiles.map": [
          {
-           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode/MinGW",
+           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/C%2B%2B/MSVC/.vscode",
            "targetPath": ".vscode"
          }
        ]
