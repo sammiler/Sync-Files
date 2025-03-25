@@ -3,7 +3,7 @@
   "displayName": "SyncFiles",
   "publisher": "sammiller",
   "description": "Sync with git",
-  "version": "1.0.6",
+  "version": "2.0.0",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -20,6 +20,7 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    
     "viewsContainers": {
       "activitybar": [
         {
@@ -46,6 +47,16 @@
     "configuration": {
       "title": "SyncFiles",
       "properties": {
+        "syncFiles.sourceUrl": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub 仓库 URL (支持 raw.githubusercontent.com 和 /tree/)"
+        },
+        "syncFiles.targetPath": {
+          "type": "string",
+          "default": ".vscode",
+          "description": "同步的目标目录 (相对于工作区根目录)"
+        },
         "syncFiles.map": {
           "type": "array",
           "items": {

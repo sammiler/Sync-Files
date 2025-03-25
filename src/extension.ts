@@ -12,50 +12,8 @@ interface Mapping {
 
 import { parse } from 'jsonc-parser';
 
-const ensureSettingsFile = async (workspacePath: string): Promise<void> => {
-    const settingsPath = path.join(workspacePath, '.vscode', 'settings.json');
-    console.log(`检查文件路径: ${settingsPath}`);
 
-    const initialSettings = {
-        "syncFiles.map": [
-            {
-                "sourceUrl": "",
-                "targetPath": ".vscode"
-            }
-        ]
-    };
 
-    try {
-        let existingSettings: { [key: string]: any } = {};
-        if (fs.existsSync(settingsPath)) {
-            console.log(`发现已有的 ${settingsPath}`);
-            const content = await fs.promises.readFile(settingsPath, 'utf8');
-            existingSettings = parse(content); // 用 jsonc-parser 解析
-            if (!existingSettings["syncFiles.map"]) {
-                console.log('无 syncFiles.map，添加默认值');
-                existingSettings["syncFiles.map"] = initialSettings["syncFiles.map"];
-                const settingsContent = JSON.stringify(existingSettings, null, 2);
-                await fs.promises.writeFile(settingsPath, settingsContent, 'utf8');
-                await vscode.workspace.getConfiguration().update('syncFiles.map', existingSettings["syncFiles.map"], vscode.ConfigurationTarget.Workspace);
-                console.log(`已更新 ${settingsPath}`);
-            } else {
-                console.log('syncFiles.map 已存在，跳过');
-            }
-        } else {
-            console.log(`未找到 ${settingsPath}，创建新文件`);
-            fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-            const settingsContent = JSON.stringify(initialSettings, null, 2);
-            await fs.promises.writeFile(settingsPath, settingsContent, 'utf8');
-            await vscode.workspace.getConfiguration().update('syncFiles.map', initialSettings["syncFiles.map"], vscode.ConfigurationTarget.Workspace);
-            console.log(`已更新 ${settingsPath}`);
-        }
-    } catch (err) {
-        console.error(`更新 ${settingsPath} 失败:`, err);
-        throw err;
-    }
-};
-
-export { ensureSettingsFile };
 // 视图提供者类
 class FetchVscodeRepoViewProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | null | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | null | void>();
@@ -90,8 +48,20 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider('syncView', viewProvider);
 
     // 获取配置
-    const getMappings = (): Mapping[] => {
-        return vscode.workspace.getConfiguration().get('syncFiles.map') as Mapping[];
+    const getMappings = (): { sourceUrl: string, targetPath: string }[] => {
+        const config = vscode.workspace.getConfiguration('syncFiles');
+        const mappings = config.get<{ sourceUrl: string, targetPath: string }[]>('map', []);
+    
+        if (mappings.length === 0) {
+            const sourceUrl = config.get<string>("sourceUrl");
+            const targetPath = config.get<string>("targetPath");
+            if (sourceUrl && targetPath) {
+                return [{ sourceUrl, targetPath }];
+            }
+            vscode.window.showErrorMessage('请在设置中设置完整');
+            return []; // Or handle the case where sourceUrl or targetPath is missing
+        }
+        return mappings;
     };
 
     const fetchFile = (url: string, targetPath: string): Promise<void> => {
@@ -111,7 +81,7 @@ export function activate(context: vscode.ExtensionContext) {
                 response.on('data', (chunk) => data += chunk);
                 response.on('end', () => {
                     const dir = path.dirname(targetPath);
-                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                    if (!fs.existsSync(dir)) {fs.mkdirSync(dir, { recursive: true });}
                     fs.writeFile(targetPath, data, (err) => {
                         if (err) {
                             console.error(`保存文件失败 (${targetPath}):`, err);
@@ -290,7 +260,7 @@ const mergeDirectory = (sourceDir: string, targetDir: string) => {
     }
     const workspacePath = workspaceFolders[0].uri.fsPath;
     context.subscriptions.push(vscode.commands.registerCommand('vscode.sync', async() => {
-        await ensureSettingsFile(workspacePath);
+
         await syncAllMappings(workspacePath);
     }));
 }
