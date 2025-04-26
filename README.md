@@ -1,4 +1,4 @@
-# SyncFiles - VSCode Extension
+# Sync-Files - VSCode Extension
 
 
 
