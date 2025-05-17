@@ -2,8 +2,8 @@
   "name": "SyncFiles",
   "displayName": "SyncFiles",
   "publisher": "sammiller",
-  "description": "Sync with git",
-  "version": "2.0.0",
+  "description": "Sync files from GitHub and execute Python scripts",
+  "version": "3.0.0",
   "engines": {
     "vscode": "^1.97.0"
   },
@@ -20,7 +20,6 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    
     "viewsContainers": {
       "activitybar": [
         {
@@ -42,44 +41,20 @@
       {
         "command": "vscode.sync",
         "title": "Start Sync"
+      },
+      {
+        "command": "vscode.refreshScripts",
+        "title": "Refresh Scripts"
+      },
+      {
+        "command": "vscode.openSettings",
+        "title": "Open Settings"
+      },
+      {
+        "command": "vscode.runScript",
+        "title": "Run Script"
       }
-    ],
-    "configuration": {
-      "title": "SyncFiles",
-      "properties": {
-        "syncFiles.sourceUrl": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub 仓库 URL (支持 raw.githubusercontent.com 和 /tree/)"
-        },
-        "syncFiles.targetPath": {
-          "type": "string",
-          "default": ".vscode",
-          "description": "同步的目标目录 (相对于工作区根目录)"
-        },
-        "syncFiles.map": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "sourceUrl": {
-                "type": "string",
-                "description": "GitHub 文件的 Raw URL 或目录的 Tree URL（例如 https://raw.githubusercontent.com/... 或 https://github.com/.../tree/...）"
-              },
-              "targetPath": {
-                "type": "string",
-                "description": "保存到项目中的相对路径（相对于工作区根目录）"
-              }
-            },
-            "required": [
-              "sourceUrl",
-              "targetPath"
-            ]
-          },
-          "description": "GitHub 文件或目录 URL 和目标路径的映射列表（必须在设置中配置，无默认值）"
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -90,8 +65,7 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "adm-zip": "^0.5.10",
-    "jsonc-parser": "^3.3.1"
+    "adm-zip": "^0.5.10"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -102,6 +76,6 @@
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
     "eslint": "^9.19.0",
-    "typescript": "^5.8.2"
+    "typescript": "^5.7.3"
   }
 }

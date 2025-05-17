@@ -1,4 +1,4 @@
-# Sync-Files - VSCode Extension
+# SyncFiles - VSCode Extension
 
 
 
@@ -39,9 +39,9 @@
    - 如果 `.vscode/settings.json` 不存在，SyncFiles 会创建它并写入默认配置：
      ```json
      {
-       "syncFiles.map": [
+       "fetchVscodeRepo.mappings": [
          {
-           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/C%2B%2B/MSVC/.vscode",
+           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode",
            "targetPath": ".vscode"
          }
        ]
