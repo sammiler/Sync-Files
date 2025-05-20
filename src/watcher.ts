@@ -1,129 +1,190 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getPythonScriptPath, getWatchEntries, getPythonExecutablePath, WatchEntry } from './config'; // Import new config items
-import { executePythonScript } from './python'; // Import for executing scripts
+import { getPythonScriptPath, getWatchEntries, getPythonExecutablePath, WatchEntry } from './config';
+import { executePythonScript } from './python';
 
-// Store all watchers (script dir watcher and custom path watchers)
-// Key can be 'scriptDirWatcher' or the watchedPath for deletion watchers
 const activeWatchers: Map<string, vscode.FileSystemWatcher> = new Map();
 
-// Helper to add a watcher and store it
 function addWatcherInstance(key: string, watcher: vscode.FileSystemWatcher) {
+    console.log(`[Watcher DEBUG] addWatcherInstance called for key: ${key}`);
     if (activeWatchers.has(key)) {
+        console.log(`[Watcher DEBUG] Disposing existing watcher for key: ${key}`);
         activeWatchers.get(key)?.dispose();
     }
     activeWatchers.set(key, watcher);
+    console.log(`[Watcher DEBUG] New watcher set for key: ${key}`);
 }
 
 export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => void): void {
-    stopWatching(); // Clear existing watchers before starting new ones
+    console.log(`[Watcher] startWatching called. Workspace: ${workspacePath}`);
+    stopWatching();
 
     // 1. Watch Python Scripts Directory for Tree View updates
     const treeViewScriptDirPath = getPythonScriptPath(workspacePath);
+    console.log(`[Watcher] Config - TreeView Script Dir Path: "${treeViewScriptDirPath}"`);
     if (treeViewScriptDirPath) {
         const absoluteTreeViewScriptDirPath = path.resolve(workspacePath, treeViewScriptDirPath);
+        console.log(`[Watcher] Resolved TreeView Script Dir Absolute Path: "${absoluteTreeViewScriptDirPath}"`);
         if (fs.existsSync(absoluteTreeViewScriptDirPath) && fs.statSync(absoluteTreeViewScriptDirPath).isDirectory()) {
             const scriptDirWatcher = vscode.workspace.createFileSystemWatcher(
                 new vscode.RelativePattern(absoluteTreeViewScriptDirPath, '**/*.py')
             );
-            const onChangeHandler = () => {
-                console.log(`Change detected in Python script directory: ${absoluteTreeViewScriptDirPath}`);
+            console.log(`[Watcher] Created FileSystemWatcher for TreeView scripts: Pattern base "${absoluteTreeViewScriptDirPath}", pattern "**/*.py"`);
+
+            const onChangeHandler = (uri?: vscode.Uri) => { // Add uri parameter for logging
+                const eventUri = uri ? uri.fsPath : 'N/A';
+                console.log(`[Watcher Event] Change detected in Python script directory: ${absoluteTreeViewScriptDirPath}. Event URI: ${eventUri}`);
                 onTreeRefreshNeeded();
             };
             scriptDirWatcher.onDidChange(onChangeHandler);
             scriptDirWatcher.onDidCreate(onChangeHandler);
             scriptDirWatcher.onDidDelete(onChangeHandler);
             addWatcherInstance('treeViewScriptsDirWatcher', scriptDirWatcher);
-            console.log(`Watching script directory for tree view: ${absoluteTreeViewScriptDirPath}`);
+            console.log(`[Watcher] Watching script directory for tree view: ${absoluteTreeViewScriptDirPath}`);
         } else {
-            console.log(`Script directory for tree view does not exist or is not a directory: ${absoluteTreeViewScriptDirPath}`);
+            console.warn(`[Watcher] TreeView Script directory does not exist or is not a directory: ${absoluteTreeViewScriptDirPath}`);
         }
     } else {
-        console.log('No Python script directory configured for tree view watching.');
+        console.log('[Watcher] No Python script directory configured for tree view watching.');
     }
 
-    // 2. Watch specific paths for deletion events
+    // 2. Watch specific paths for deletion events (and other events in modified versions)
     const watchEntries = getWatchEntries(workspacePath);
+    console.log(`[Watcher] Config - Watch Entries: ${JSON.stringify(watchEntries, null, 2)}`);
     const pythonExecutable = getPythonExecutablePath(workspacePath);
+    console.log(`[Watcher] Config - Python Executable Path: "${pythonExecutable}"`);
 
-    if (!pythonExecutable) {
-        console.warn('Python executable path not configured. Deletion watchers that trigger Python scripts will not function.');
+    if (!pythonExecutable && watchEntries.some(entry => entry.onDeleteScript)) { // Check if any script is configured
+        console.warn('[Watcher] Python executable path not configured. Watchers that trigger Python scripts might not function.');
     }
 
-    watchEntries.forEach((entry: WatchEntry) => {
+    if (!watchEntries || watchEntries.length === 0) {
+        console.log('[Watcher] No custom watch entries configured.');
+    }
+
+    watchEntries.forEach((entry: WatchEntry, index: number) => {
+        console.log(`[Watcher] Processing Watch Entry #${index}: Path="${entry.watchedPath}", Script="${entry.onDeleteScript}"`);
+        if (!entry.watchedPath) {
+            console.warn(`[Watcher] Watch Entry #${index} has no watchedPath configured. Skipping.`);
+            return; // Skip this entry if watchedPath is empty
+        }
+        // onDeleteScript can be empty if no script is intended for this watcher.
+
         const absoluteWatchedPath = path.resolve(workspacePath, entry.watchedPath);
-        const absoluteOnDeleteScriptPath = path.resolve(workspacePath, entry.onDeleteScript);
+        console.log(`[Watcher] Entry #${index} - Resolved Watched Absolute Path: "${absoluteWatchedPath}"`);
+        
+        let absoluteOnEventScriptPath: string | undefined = undefined;
+        if (entry.onDeleteScript) {
+            absoluteOnEventScriptPath = path.resolve(workspacePath, entry.onDeleteScript);
+            console.log(`[Watcher] Entry #${index} - Resolved Script Absolute Path: "${absoluteOnEventScriptPath}"`);
+        }
+
 
         if (!fs.existsSync(absoluteWatchedPath)) {
-            console.warn(`Watched path does not exist, cannot watch: ${absoluteWatchedPath}`);
+            console.warn(`[Watcher] Entry #${index} - Watched path does not exist, cannot watch: ${absoluteWatchedPath}`);
             return;
         }
-        if (!pythonExecutable && entry.onDeleteScript) {
-            console.warn(`Cannot run script for ${absoluteWatchedPath} on delete: Python executable not set.`);
-            return;
-        }
-        if (entry.onDeleteScript && !fs.existsSync(absoluteOnDeleteScriptPath)) {
-            console.warn(`onDeleteScript path does not exist, cannot run for ${absoluteWatchedPath}: ${absoluteOnDeleteScriptPath}`);
-            return;
+
+        // Script existence checks (only if a script is configured)
+        if (entry.onDeleteScript) {
+            if (!pythonExecutable) {
+                console.warn(`[Watcher] Entry #${index} - Cannot run script for ${absoluteWatchedPath}: Python executable not set.`);
+                // Don't return yet, watcher might still be useful for logging or future non-script actions
+            }
+            if (absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
+                console.warn(`[Watcher] Entry #${index} - Script path does not exist for ${absoluteWatchedPath}: ${absoluteOnEventScriptPath}`);
+            }
         }
         
-        // Create a glob pattern. If it's a directory, watch all files within.
-        // If it's a file, watch that specific file.
         let globPattern: vscode.GlobPattern;
+        let isDirectoryWatch = false;
         try {
             const stats = fs.statSync(absoluteWatchedPath);
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(absoluteWatchedPath));
+            
             if (!workspaceFolder) {
-                 console.warn(`Cannot create watcher: ${absoluteWatchedPath} is not within a workspace folder.`);
+                 console.warn(`[Watcher] Entry #${index} - Cannot create watcher: Path ${absoluteWatchedPath} is not within an open workspace folder.`);
                  return;
             }
+            const relativePathFromWorkspace = path.relative(workspaceFolder.uri.fsPath, absoluteWatchedPath);
 
             if (stats.isDirectory()) {
-                globPattern = new vscode.RelativePattern(workspaceFolder, path.join(path.relative(workspaceFolder.uri.fsPath, absoluteWatchedPath), '**/*'));
+                isDirectoryWatch = true;
+                // globPattern = new vscode.RelativePattern(workspaceFolder, path.join(relativePathFromWorkspace, '**/*')); // Original method
+                // Using the direct URI method which is often more robust for directories:
+                const watchedDirUri = vscode.Uri.file(absoluteWatchedPath);
+                globPattern = new vscode.RelativePattern(watchedDirUri, '**'); // Monitor all content recursively
+                console.log(`[Watcher] Entry #${index} - Setting up DIRECTORY watch. Base URI: ${watchedDirUri.toString()}, Pattern: "**"`);
             } else { // Is a file
-                globPattern = new vscode.RelativePattern(workspaceFolder, path.relative(workspaceFolder.uri.fsPath, absoluteWatchedPath));
+                // globPattern = new vscode.RelativePattern(workspaceFolder, relativePathFromWorkspace); // Original method
+                // Using the direct URI method for files too:
+                const watchedFileDirUri = vscode.Uri.file(path.dirname(absoluteWatchedPath));
+                const watchedFileName = path.basename(absoluteWatchedPath);
+                globPattern = new vscode.RelativePattern(watchedFileDirUri, watchedFileName);
+                console.log(`[Watcher] Entry #${index} - Setting up FILE watch. Base URI: ${watchedFileDirUri.toString()}, Pattern: "${watchedFileName}"`);
             }
         } catch(e) {
-            console.error(`Error stating path ${absoluteWatchedPath}: `, e);
+            console.error(`[Watcher] Entry #${index} - Error stating path ${absoluteWatchedPath} or processing for glob: `, e);
             return;
         }
 
+        // Naming the watcher based on the original config for clarity
+        const watcherKey = `pathWatcher_${entry.watchedPath.replace(/[/\\]/g, '_')}`; // Sanitize path for key
+        const pathWatcher = vscode.workspace.createFileSystemWatcher(globPattern, false, false, false); //Explicitly don't ignore any event types
+        console.log(`[Watcher] Entry #${index} - Created FileSystemWatcher with key ${watcherKey}. Base: "${globPattern.baseUri.toString()}", Pattern: "${globPattern.pattern}"`);
 
-        const deletionWatcher = vscode.workspace.createFileSystemWatcher(globPattern);
+        // Generic event handler function
+        const handleFileSystemEvent = async (eventType: string, uri: vscode.Uri) => {
+            console.log(`[Watcher Event] ${eventType} detected by watcher for base "${globPattern.baseUri.toString()}" with pattern "${globPattern.pattern}". Event URI: ${uri.fsPath}. Configured watch: ${entry.watchedPath}`);
 
-        deletionWatcher.onDidDelete(async (uri: vscode.Uri) => {
-            console.log(`Deletion detected for watched path: ${uri.fsPath} (matches entry for ${absoluteWatchedPath})`);
-            if (entry.onDeleteScript && pythonExecutable) {
+            // Check if the event URI is within the watched directory (if it's a directory watch)
+            // This is an extra sanity check; the glob pattern should ideally handle this.
+            if (isDirectoryWatch && !uri.fsPath.startsWith(absoluteWatchedPath + path.sep) && uri.fsPath !== absoluteWatchedPath) {
+                console.log(`[Watcher Event] ${eventType} URI ${uri.fsPath} is outside watched directory ${absoluteWatchedPath}. Glob: pattern "${globPattern.pattern}", base "${globPattern.baseUri.toString()}". Ignoring script call based on this check.`);
+                // return; // You might decide to return here if you are sure glob should prevent this.
+            }
+
+            if (entry.onDeleteScript && pythonExecutable && absoluteOnEventScriptPath && fs.existsSync(absoluteOnEventScriptPath)) {
                 try {
-                    vscode.window.showInformationMessage(`File deleted: ${uri.fsPath}. Triggering script: ${entry.onDeleteScript}`);
+                    // Map eventType to script argument (e.g., "Change Del", "Change Mod", "Change New")
+                    let scriptArgEventType = "Unknown Event";
+                    if (eventType === "DELETION") scriptArgEventType = "Change Del";
+                    else if (eventType === "MODIFICATION") scriptArgEventType = "Change Mod";
+                    else if (eventType === "CREATION") scriptArgEventType = "Change New";
+                    
                     await executePythonScript(
                         workspacePath,
                         pythonExecutable,
-                        absoluteOnDeleteScriptPath, // Ensure this is an absolute path
-                        ["Change Del", uri.fsPath] // Pass "Change Del" and the deleted file path
+                        absoluteOnEventScriptPath,
+                        [scriptArgEventType, uri.fsPath],
+                        {showNotifications:false}
                     );
                 } catch (err) {
-                    vscode.window.showErrorMessage(`Failed to execute onDelete script for ${uri.fsPath}: ${err instanceof Error ? err.message : String(err)}`);
-                    console.error(`Error executing onDelete script for ${uri.fsPath}:`, err);
+                    console.error(`[Watcher] Error executing script for ${eventType} on ${uri.fsPath}:`, err);
                 }
-            } else if (!pythonExecutable && entry.onDeleteScript) {
-                 vscode.window.showWarningMessage(`File deleted: ${uri.fsPath}, but Python executable not set. Cannot run script.`);
+            } else if (entry.onDeleteScript && !pythonExecutable) {
+                console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Python executable not set.`);
+            } else if (entry.onDeleteScript && absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
+                 console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Script ${entry.onDeleteScript} not found.`);
             }
-        });
+        };
         
-        // It's also good practice to handle onDidChange and onDidCreate if the watched path itself is modified/recreated
-        // For now, focusing on onDidDelete as per requirement.
-
-        addWatcherInstance(`deletionWatcher_${absoluteWatchedPath}`, deletionWatcher);
-        console.log(`Watching for deletions (and sub-deletions if dir): ${absoluteWatchedPath} -> script: ${entry.onDeleteScript || 'None'}`);
+        pathWatcher.onDidCreate((uri) => handleFileSystemEvent("CREATION", uri));
+        pathWatcher.onDidChange((uri) => handleFileSystemEvent("MODIFICATION", uri));
+        pathWatcher.onDidDelete((uri) => handleFileSystemEvent("DELETION", uri));
+        
+        addWatcherInstance(watcherKey, pathWatcher);
+        console.log(`[Watcher] Entry #${index} - Now watching for C/U/D on base: ${globPattern.baseUri.toString()}, pattern: ${globPattern.pattern} -> script: ${entry.onDeleteScript || 'None'}`);
     });
 }
 
 export function stopWatching(): void {
+    console.log('[Watcher] stopWatching called.');
     activeWatchers.forEach((watcher, key) => {
         watcher.dispose();
-        console.log(`Stopped watching: ${key}`);
+        console.log(`[Watcher] Stopped and disposed watcher: ${key}`);
     });
     activeWatchers.clear();
+    console.log('[Watcher] All active watchers cleared.');
 }

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { FetchVscodeRepoViewProvider } from './view';
 import { syncAllMappings } from './sync';
 import { startWatching, stopWatching } from './watcher';
@@ -44,7 +45,17 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
             try {
-                await executePythonScript(workspacePath, exePath, scriptPath);
+                await executePythonScript(
+                    workspacePath, 
+                    exePath, 
+                    scriptPath, // This path should be resolvable by executePythonScript
+                    [],                     // Args, if any, for UI-triggered scripts
+                    { 
+                        showNotifications: true, 
+                        showErrorModal: true, // Errors from UI actions are important
+                        successMessage: `Script '${path.basename(scriptPath)}' executed successfully via UI.` 
+                    }
+                );
             } catch (err) {
                 vscode.window.showErrorMessage('Script execution failed: ' + (err instanceof Error ? err.message : String(err)));
             }
