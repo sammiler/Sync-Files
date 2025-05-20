@@ -3,7 +3,7 @@
   "displayName": "SyncFiles",
   "publisher": "sammiller",
   "description": "Sync files from GitHub and execute Python scripts",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "engines": {
     "vscode": "^1.97.0"
   },

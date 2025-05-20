@@ -35,14 +35,3 @@
 2. **触发同步**：
    - 点击左侧活动栏的 “Sync Files” 图标。
    - 在 “Sync Control” 视图中，点击 “Start Sync” 按钮。
-3. **自动配置**：
-   - 如果 `.vscode/settings.json` 不存在，SyncFiles 会创建它并写入默认配置：
-     ```json
-     {
-       "fetchVscodeRepo.mappings": [
-         {
-           "sourceUrl": "https://github.com/sammiler/VSCodeConf/tree/main/Windows/.vscode",
-           "targetPath": ".vscode"
-         }
-       ]
-     }
