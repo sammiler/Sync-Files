@@ -23,7 +23,7 @@ interface Message {
     pythonExecutablePath?: string;
     watchEntries?: WatchEntry[]; // 添加到消息接口
     path?: string; // 用于浏览结果
-    entryType?: 'watchedPath' | 'onDeleteScript'; // 用于区分 watch entries 的浏览调用
+    entryType?: 'watchedPath' | 'onEventScript'; // 用于区分 watch entries 的浏览调用
     index?: number; // 用于更新特定的 watch entry 路径
 }
 
@@ -157,19 +157,19 @@ export function registerSettingsWebview(context: vscode.ExtensionContext, worksp
                                 path: path.relative(workspacePath, uri[0].fsPath)
                             });
                         }
-                    } else if (message.entryType === 'onDeleteScript') {
+                    } else if (message.entryType === 'onEventScript') {
                         const uri = await vscode.window.showOpenDialog({
                             canSelectFiles: true,
                             canSelectFolders: false,
                             openLabel: 'Select Python Script for Deletion Event',
                             filters: { 'Python Scripts': ['py'] }
                         });
-                        console.log('Extension Host: browseWatchEntryPath (onDeleteScript) dialog returned:', uri); // 调试日志
+                        console.log('Extension Host: browseWatchEntryPath (onEventScript) dialog returned:', uri); // 调试日志
                         if (uri && uri[0]) {
                             panel.webview.postMessage({
                                 command: 'setWatchEntryPath',
                                 index: message.index,
-                                entryType: 'onDeleteScript',
+                                entryType: 'onEventScript',
                                 path: path.relative(workspacePath, uri[0].fsPath)
                             });
                         }
@@ -421,8 +421,8 @@ function getWebviewContent(): string {
                             </td>
                             <td>
                                 <div class="path-field" style="margin-bottom: 0;">
-                                    <input type="text" value="\${w.onDeleteScript || ''}" oninput="updateWatchEntry(\${i}, 'onDeleteScript', this.value)" placeholder="e.g., scripts/cleanup_on_delete.py">
-                                    <button onclick="browseWatchEntryPath(\${i}, 'onDeleteScript')">Browse</button>
+                                    <input type="text" value="\${w.onEventScript || ''}" oninput="updateWatchEntry(\${i}, 'onEventScript', this.value)" placeholder="e.g., scripts/cleanup_on_delete.py">
+                                    <button onclick="browseWatchEntryPath(\${i}, 'onEventScript')">Browse</button>
                                 </div>
                             </td>
                             <td><button class="remove-button" onclick="removeWatchEntry(\${i})">Remove</button></td>
@@ -441,7 +441,7 @@ function getWebviewContent(): string {
                 function removeEnvVar(index) { console.log('WebView JS: removeEnvVar', index); envVars.splice(index, 1); renderEnvVarsTable(); }
 
                 // WatchEntries functions
-                function addWatchEntryRow() { console.log('WebView JS: addWatchEntryRow'); watchEntries.push({ watchedPath: '', onDeleteScript: '' }); renderWatchEntriesTable(); }
+                function addWatchEntryRow() { console.log('WebView JS: addWatchEntryRow'); watchEntries.push({ watchedPath: '', onEventScript: '' }); renderWatchEntriesTable(); }
                 function updateWatchEntry(index, field, value) { watchEntries[index][field] = value; console.log('WebView JS: updateWatchEntry', index, field, value); }
                 function removeWatchEntry(index) { console.log('WebView JS: removeWatchEntry', index); watchEntries.splice(index, 1); renderWatchEntriesTable(); }
 
@@ -474,7 +474,7 @@ function getWebviewContent(): string {
                         envVars: envVars.filter(e => e.key),
                         pythonScriptPath,
                         pythonExecutablePath,
-                        watchEntries: watchEntries.filter(w => w.watchedPath || w.onDeleteScript)
+                        watchEntries: watchEntries.filter(w => w.watchedPath || w.onEventScript)
                     });
                 }
 

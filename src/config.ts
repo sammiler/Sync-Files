@@ -15,7 +15,7 @@ export interface EnvVar {
 
 export interface WatchEntry { // New interface for watched entries
     watchedPath: string;
-    onDeleteScript: string;
+    onEventScript: string;
 }
 
 interface Config {
@@ -77,7 +77,7 @@ export async function saveConfig(
         envVars: Array.from(envVars.entries()).map(([key, value]) => ({ key, value })).filter(e => e.key),
         pythonScriptPath,
         pythonExecutablePath,
-        watchEntries: watchEntries.filter(w => w.watchedPath && w.onDeleteScript) // Filter invalid entries
+        watchEntries: watchEntries.filter(w => w.watchedPath && w.onEventScript) // Filter invalid entries
     };
 
     const configPath = getConfigFilePath(workspacePath);

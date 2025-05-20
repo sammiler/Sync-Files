@@ -55,7 +55,7 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
     const pythonExecutable = getPythonExecutablePath(workspacePath);
     console.log(`[Watcher] Config - Python Executable Path: "${pythonExecutable}"`);
 
-    if (!pythonExecutable && watchEntries.some(entry => entry.onDeleteScript)) { // Check if any script is configured
+    if (!pythonExecutable && watchEntries.some(entry => entry.onEventScript)) { // Check if any script is configured
         console.warn('[Watcher] Python executable path not configured. Watchers that trigger Python scripts might not function.');
     }
 
@@ -64,19 +64,19 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
     }
 
     watchEntries.forEach((entry: WatchEntry, index: number) => {
-        console.log(`[Watcher] Processing Watch Entry #${index}: Path="${entry.watchedPath}", Script="${entry.onDeleteScript}"`);
+        console.log(`[Watcher] Processing Watch Entry #${index}: Path="${entry.watchedPath}", Script="${entry.onEventScript}"`);
         if (!entry.watchedPath) {
             console.warn(`[Watcher] Watch Entry #${index} has no watchedPath configured. Skipping.`);
             return; // Skip this entry if watchedPath is empty
         }
-        // onDeleteScript can be empty if no script is intended for this watcher.
+        // onEventScript can be empty if no script is intended for this watcher.
 
         const absoluteWatchedPath = path.resolve(workspacePath, entry.watchedPath);
         console.log(`[Watcher] Entry #${index} - Resolved Watched Absolute Path: "${absoluteWatchedPath}"`);
         
         let absoluteOnEventScriptPath: string | undefined = undefined;
-        if (entry.onDeleteScript) {
-            absoluteOnEventScriptPath = path.resolve(workspacePath, entry.onDeleteScript);
+        if (entry.onEventScript) {
+            absoluteOnEventScriptPath = path.resolve(workspacePath, entry.onEventScript);
             console.log(`[Watcher] Entry #${index} - Resolved Script Absolute Path: "${absoluteOnEventScriptPath}"`);
         }
 
@@ -87,7 +87,7 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
         }
 
         // Script existence checks (only if a script is configured)
-        if (entry.onDeleteScript) {
+        if (entry.onEventScript) {
             if (!pythonExecutable) {
                 console.warn(`[Watcher] Entry #${index} - Cannot run script for ${absoluteWatchedPath}: Python executable not set.`);
                 // Don't return yet, watcher might still be useful for logging or future non-script actions
@@ -145,7 +145,7 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
                 // return; // You might decide to return here if you are sure glob should prevent this.
             }
 
-            if (entry.onDeleteScript && pythonExecutable && absoluteOnEventScriptPath && fs.existsSync(absoluteOnEventScriptPath)) {
+            if (entry.onEventScript && pythonExecutable && absoluteOnEventScriptPath && fs.existsSync(absoluteOnEventScriptPath)) {
                 try {
                     // Map eventType to script argument (e.g., "Change Del", "Change Mod", "Change New")
                     let scriptArgEventType = "Unknown Event";
@@ -163,10 +163,10 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
                 } catch (err) {
                     console.error(`[Watcher] Error executing script for ${eventType} on ${uri.fsPath}:`, err);
                 }
-            } else if (entry.onDeleteScript && !pythonExecutable) {
+            } else if (entry.onEventScript && !pythonExecutable) {
                 console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Python executable not set.`);
-            } else if (entry.onDeleteScript && absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
-                 console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Script ${entry.onDeleteScript} not found.`);
+            } else if (entry.onEventScript && absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
+                 console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Script ${entry.onEventScript} not found.`);
             }
         };
         
@@ -175,7 +175,7 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
         pathWatcher.onDidDelete((uri) => handleFileSystemEvent("DELETION", uri));
         
         addWatcherInstance(watcherKey, pathWatcher);
-        console.log(`[Watcher] Entry #${index} - Now watching for C/U/D on base: ${globPattern.baseUri.toString()}, pattern: ${globPattern.pattern} -> script: ${entry.onDeleteScript || 'None'}`);
+        console.log(`[Watcher] Entry #${index} - Now watching for C/U/D on base: ${globPattern.baseUri.toString()}, pattern: ${globPattern.pattern} -> script: ${entry.onEventScript || 'None'}`);
     });
 }
 
