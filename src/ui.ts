@@ -7,7 +7,7 @@ import {
     getPythonScriptPath,
     getPythonExecutablePath,
     getWatchEntries, // 导入新的 getter
-    saveConfig,
+    saveCoreSettings,
     Mapping,
     EnvVar,
     WatchEntry // 导入新的类型
@@ -78,7 +78,7 @@ export function registerSettingsWebview(context: vscode.ExtensionContext, worksp
                     }
 
 
-                    await saveConfig(mappings, envVars, pythonScriptPath, pythonExecutablePath, watchEntries, workspacePath);
+                    await saveCoreSettings(workspacePath,mappings, envVars, pythonScriptPath, pythonExecutablePath, watchEntries);
                     vscode.window.showInformationMessage('Settings saved successfully!');
                     panel.dispose(); // 保存后关闭面板
                 } catch (err) {

@@ -2,10 +2,10 @@
   "name": "SyncFiles",
   "displayName": "SyncFiles",
   "publisher": "sammiller",
-  "description": "Sync files from GitHub and execute Python scripts",
-  "version": "3.0.1",
+  "description": "Sync files from GitHub, manage and execute Python scripts with virtual groups.",
+  "version": "3.1.0",
   "engines": {
-    "vscode": "^1.97.0"
+    "vscode": "^1.97.0" 
   },
   "icon": "media/sync.png",
   "repository": {
@@ -20,12 +20,172 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "syncfiles.syncAll",
+        "title": "SyncFiles: Start Sync All Mappings",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.refreshTreeView",
+        "title": "SyncFiles: Refresh Tree View",
+        "category": "SyncFiles",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "syncfiles.openSettings",
+        "title": "SyncFiles: Open Settings Webview",
+        "category": "SyncFiles",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "syncfiles.runScriptVSCodeAPI",
+        "title": "SyncFiles: Run Script (VSCode API)",
+        "category": "SyncFiles",
+        "icon": "$(run)" 
+      },
+      {
+        "command": "syncfiles.runScriptInTerminal",
+        "title": "SyncFiles: Run Script (In Terminal)",
+        "category": "SyncFiles",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "syncfiles.runScriptDefault",
+        "title": "SyncFiles: Run Script (Default)",
+        "category": "SyncFiles",
+        "icon": "$(play)"
+      },
+      {
+        "command": "syncfiles.createScriptGroup",
+        "title": "SyncFiles: Create New Script Group",
+        "category": "SyncFiles",
+        "icon": "$(add)"
+      },
+      {
+        "command": "syncfiles.renameScriptGroup",
+        "title": "SyncFiles: Rename Script Group",
+        "category": "SyncFiles",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "syncfiles.deleteScriptGroup",
+        "title": "SyncFiles: Delete Script Group",
+        "category": "SyncFiles",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "syncfiles.addScriptToGroup",
+        "title": "SyncFiles: Add Script to Group...",
+        "category": "SyncFiles",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "syncfiles.editScriptDetails",
+        "title": "SyncFiles: Edit Script Alias/Description",
+        "category": "SyncFiles",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "syncfiles.setScriptExecutionMode",
+        "title": "SyncFiles: Set Default Execution Mode...",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.removeScriptFromGroup",
+        "title": "SyncFiles: Remove Script from Group",
+        "category": "SyncFiles",
+        "icon": "$(close)"
+      },
+      {
+        "command": "syncfiles.moveScriptToGroup",
+        "title": "SyncFiles: Move Script to Another Group...",
+        "category": "SyncFiles",
+        "icon": "$(fold-up)" 
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "syncfiles.refreshTreeView",
+          "when": "view == syncView",
+          "group": "navigation"
+        },
+        {
+            "command": "syncfiles.openSettings",
+            "when": "view == syncView",
+            "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "syncfiles.createScriptGroup",
+          "when": "view == syncView && viewItem == scriptsRoot",
+          "group": "1_modification"
+        },
+        {
+          "command": "syncfiles.addScriptToGroup",
+          "when": "view == syncView && viewItem == scriptGroup",
+          "group": "1_modification"
+        },
+        {
+          "command": "syncfiles.renameScriptGroup",
+          "when": "view == syncView && viewItem == scriptGroup",
+          "group": "1_modification"
+        },
+        {
+          "command": "syncfiles.deleteScriptGroup",
+          "when": "view == syncView && viewItem == scriptGroup",
+          "group": "1_modification"
+        },
+        {
+          "command": "syncfiles.runScriptDefault",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "1_execution@1"
+        },
+        {
+          "command": "syncfiles.runScriptVSCodeAPI",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "1_execution@2"
+        },
+        {
+          "command": "syncfiles.runScriptInTerminal",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "1_execution@3"
+        },
+        {
+          "command": "syncfiles.editScriptDetails",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "2_modification"
+        },
+        {
+          "command": "syncfiles.moveScriptToGroup",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "2_modification"
+        },
+        {
+            "command": "syncfiles.setScriptExecutionMode",
+            "when": "view == syncView && viewItem == scriptItem",
+            "group": "2_modification"
+        },
+        {
+          "command": "syncfiles.removeScriptFromGroup",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "z_modification" 
+        },
+        {
+          "command": "syncfiles.addScriptToGroup", 
+          "when": "view == syncView && viewItem == ungroupedScriptItem",
+          "group": "1_modification"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
           "id": "sync-container",
           "title": "SyncFiles",
-          "icon": "media/icon.svg"
+          "icon": "media/icon.svg" 
         }
       ]
     },
@@ -33,35 +193,17 @@
       "sync-container": [
         {
           "id": "syncView",
-          "name": "Sync Control"
+          "name": "Sync Control & Scripts"
         }
       ]
-    },
-    "commands": [
-      {
-        "command": "vscode.sync",
-        "title": "Start Sync"
-      },
-      {
-        "command": "vscode.refreshScripts",
-        "title": "Refresh Scripts"
-      },
-      {
-        "command": "vscode.openSettings",
-        "title": "Open Settings"
-      },
-      {
-        "command": "vscode.runScript",
-        "title": "Run Script"
-      }
-    ]
+    }
   },
-    "scripts": {
+  "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src",
+    "lint": "eslint src --ext ts",
     "test": "vscode-test"
   },
   "dependencies": {
@@ -71,7 +213,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
-    "@types/vscode": "^1.97.0",
+    "@types/vscode": "^1.97.0", 
     "@typescript-eslint/eslint-plugin": "^8.22.0",
     "@typescript-eslint/parser": "^8.22.0",
     "@vscode/test-cli": "^0.0.10",
