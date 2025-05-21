@@ -1,375 +1,255 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { FetchVscodeRepoViewProvider, ScriptGroupTreeItem, ScriptItemTreeItem, UngroupedScriptFileTreeItem } from './view'; // Import new TreeItem types
+import { FetchVscodeRepoViewProvider, ScriptGroupTreeItem, ScriptItemTreeItem } from './view';
 import { syncAllMappings } from './sync';
 import { startWatching, stopWatching } from './watcher';
 import { registerSettingsWebview } from './ui';
 import { executePythonScript } from './python';
 import {
-    getPythonExecutablePath,
-    getPythonScriptPath,
-    getScriptGroups,
-    addScriptGroup,
-    updateScriptGroup,
-    removeScriptGroup,
-    addScriptToGroup,
-    updateScriptInGroup,
-    removeScriptFromGroup,
-    findScriptAndGroup,
-    getAllAssignedScriptPaths,
-    ScriptGroupConfig,
-    ScriptItemConfig,
-    getEnvVars,
-    readConfig, // For saving full config directly if needed
-    saveFullConfig
+    getPythonExecutablePath, getPythonScriptPath, getScriptGroups, 
+    addScriptGroup as addScriptGroupToConfig, // Use alias to avoid confusion
+    updateScriptGroup as updateScriptGroupInConfig,
+    removeScriptGroupAndSave, // Use new distinct name
+    addScriptToGroupAndSave, 
+    updateScriptInGroupAndSave,
+    ScriptGroupConfig, ScriptItemConfig, getEnvVars, readConfig, saveFullConfig,
+    DEFAULT_SCRIPT_GROUP_ID, getDefaultGroupNameSetting, 
+    synchronizeConfigWithFileSystem, Config, getAllAssignedScriptPaths // Import new function
 } from './config';
-import { generateUUID } from './utils'; // Import UUID generator
+import { generateUUID, normalizePath, ensureAbsolute } from './utils';
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log('Extension "SyncFiles" activated!');
+let treeViewInstance: vscode.TreeView<vscode.TreeItem> | undefined;
+let viewProviderInstance: FetchVscodeRepoViewProvider | undefined; // Store viewProvider instance
 
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showErrorMessage('SyncFiles: Please open a workspace first.');
-        return;
+async function refreshAndSyncConfig(workspacePath: string): Promise<void> {
+    console.log("[SyncFiles] Executing refreshAndSyncConfig...");
+    let currentConfig = readConfig(workspacePath); // Read fresh config from disk
+    
+    // synchronizeConfigWithFileSystem MUTATES currentConfig and returns a boolean
+    const changed = synchronizeConfigWithFileSystem(currentConfig, workspacePath); 
+
+    if (changed) {
+        console.log("[SyncFiles] Config changed during sync, saving...");
+        // currentConfig is already the updated one (mutated by synchronizeConfigWithFileSystem)
+        // saveFullConfig will perform its own final cleanup of empty script.path and save
+        await saveFullConfig(workspacePath, currentConfig); 
     }
+    
+    // Refresh the view using the viewProvider instance
+    if (viewProviderInstance) {
+        viewProviderInstance.refresh();
+    } else {
+        console.warn("[SyncFiles] viewProviderInstance not available for refresh. TreeView might not update immediately.");
+        // As a fallback, if direct refresh isn't possible, trigger the command.
+        // This command itself calls refreshAndSyncConfig, ensure this path doesn't cause infinite loop.
+        // The 'changed' flag above should prevent re-saving if config is already in sync.
+        // However, to be safe, direct refresh is preferred.
+        // await vscode.commands.executeCommand('syncfiles.refreshTreeView'); 
+    }
+}
+
+export async function activate(context: vscode.ExtensionContext) {
+    console.log('Extension "SyncFiles" activated!');
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) { vscode.window.showErrorMessage('SyncFiles: Please open a workspace first.'); return; }
     const workspacePath = workspaceFolders[0].uri.fsPath;
 
-    const viewProvider = new FetchVscodeRepoViewProvider(workspacePath);
-    vscode.window.registerTreeDataProvider('syncView', viewProvider);
+    // Initial sync when activating
+    await refreshAndSyncConfig(workspacePath); 
 
-    // --- COMMAND REGISTRATIONS ---
+    viewProviderInstance = new FetchVscodeRepoViewProvider(workspacePath); // Assign to global
+    treeViewInstance = vscode.window.createTreeView('syncView', { treeDataProvider: viewProviderInstance });
+    context.subscriptions.push(treeViewInstance);
 
-    // Core commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('syncfiles.syncAll', async () => { // Changed name
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.refreshTreeView', async () => {
+        // This command is now the main entry point for a full sync and UI update
+        await refreshAndSyncConfig(workspacePath); 
+        // refreshAndSyncConfig does not directly refresh the view anymore,
+        // so we ensure viewProviderInstance.refresh() is called here if viewProviderInstance is set.
+        if (viewProviderInstance) {
+            viewProviderInstance.refresh();
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.syncAll', async () => { try { await syncAllMappings(workspacePath); vscode.window.showInformationMessage('SyncFiles: Synchronization complete!'); } catch (e) { const msg = e instanceof Error ? e.message : String(e); console.error('SyncFiles Sync error:', e); vscode.window.showErrorMessage('SyncFiles: Synchronization failed: ' + msg); } }));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.openSettings', () => registerSettingsWebview(context, workspacePath)));
+
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.openScriptFile', async (item?: ScriptItemTreeItem | vscode.Uri) => {
+        let uriToOpen: vscode.Uri | undefined;
+        if (item instanceof ScriptItemTreeItem) uriToOpen = item.resourceUri;
+        else if (item instanceof vscode.Uri) uriToOpen = item;
+        else if (treeViewInstance?.selection[0] instanceof ScriptItemTreeItem) uriToOpen = (treeViewInstance.selection[0] as ScriptItemTreeItem).resourceUri;
+        if (uriToOpen) { try { await vscode.commands.executeCommand('vscode.open', uriToOpen); } catch (e) { vscode.window.showErrorMessage(`Failed to open file: ${e instanceof Error ? e.message : String(e)}`); } }
+        else vscode.window.showWarningMessage('SyncFiles: No script selected or URI provided to open.');
+    }));
+
+    const executeScriptSharedLogic = async (itemOrPath: ScriptItemTreeItem | string, executionType: 'api' | 'terminal') => {
+        const pythonExecutableSetting = getPythonExecutablePath(workspacePath);
+        if (!pythonExecutableSetting) { vscode.window.showErrorMessage('Python executable path not configured.'); return; }
+        const resolvedPythonExecutable = normalizePath(ensureAbsolute(pythonExecutableSetting, workspacePath));
+
+        let scriptPathForExecution: string;
+        let scriptName: string;
+
+        if (itemOrPath instanceof ScriptItemTreeItem) {
+            scriptName = (itemOrPath.label as string) || path.basename(itemOrPath.scriptConfig.path);
+            const pythonScriptDirSetting = getPythonScriptPath(workspacePath);
+            const scriptDir = ensureAbsolute(pythonScriptDirSetting, workspacePath);
+            scriptPathForExecution = normalizePath(path.resolve(scriptDir, itemOrPath.scriptConfig.path));
+        } else if (typeof itemOrPath === 'string') {
+            scriptPathForExecution = normalizePath(ensureAbsolute(itemOrPath, workspacePath));
+            scriptName = path.basename(scriptPathForExecution);
+        } else {
+            vscode.window.showErrorMessage('Invalid item for script execution.'); return;
+        }
+        
+        const unquotedExecutable = resolvedPythonExecutable.replace(/^"|"$/g, '');
+        if (!fs.existsSync(unquotedExecutable)) {
             try {
-                await syncAllMappings(workspacePath);
-                vscode.window.showInformationMessage('SyncFiles: Synchronization complete!');
-            } catch (err) {
-                console.error('SyncFiles Sync error:', err);
-                vscode.window.showErrorMessage('SyncFiles: Synchronization failed: ' + (err instanceof Error ? err.message : String(err)));
-            }
-        }),
-        vscode.commands.registerCommand('syncfiles.refreshTreeView', () => { // Changed name
-            viewProvider.refresh();
-        }),
-        vscode.commands.registerCommand('syncfiles.openSettings', () => {
-            registerSettingsWebview(context, workspacePath);
-        })
-    );
-
-    // Script Execution Commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('syncfiles.runScriptVSCodeAPI', async (item: ScriptItemTreeItem | { scriptPath: string, scriptId?: string }) => {
-            let scriptPathToRun: string;
-            let scriptName: string;
-
-            if (item instanceof ScriptItemTreeItem) {
-                scriptPathToRun = item.scriptConfig.path;
-                scriptName = item.label as string;
-            } else if (item && typeof item.scriptPath === 'string') { // For running event scripts from watcher
-                scriptPathToRun = item.scriptPath;
-                scriptName = path.basename(scriptPathToRun);
-            } else {
-                vscode.window.showErrorMessage('SyncFiles: Invalid script item for execution.');
+                const { execFileSync } = require('child_process');
+                execFileSync(unquotedExecutable, ['--version'], { timeout: 2000, stdio: 'ignore' });
+            } catch (e) {
+                vscode.window.showErrorMessage(`Python executable '${unquotedExecutable}' could not be verified. Error: ${e instanceof Error ? e.message : String(e)}`);
                 return;
             }
-            
-            const exePath = getPythonExecutablePath(workspacePath);
-            if (!exePath) {
-                vscode.window.showErrorMessage('SyncFiles: Python executable path not configured.');
-                return;
-            }
-            // Ensure scriptPathToRun is relative to pythonScriptPath for executePythonScript if it expects that
-            // Or make it absolute here. executePythonScript already resolves it from workspacePath.
-            // If scriptPathToRun is already relative to pythonScriptPath, and pythonScriptPath is relative to workspace:
-            const fullRelativePath = path.join(getPythonScriptPath(workspacePath), scriptPathToRun);
+        }
+        if (!fs.existsSync(scriptPathForExecution)) {vscode.window.showErrorMessage(`Script file not found: ${scriptPathForExecution}`); return;}
 
+        if (executionType === 'api') {
             try {
-                await executePythonScript(
-                    workspacePath,
-                    exePath,
-                    fullRelativePath,
-                    [],
-                    {
-                        showNotifications: true,
-                        showErrorModal: true,
-                        successMessage: `Script '${scriptName}' executed successfully via VSCode API.`
-                    }
-                );
-            } catch (err) {
-                // executePythonScript already shows an error
-                // vscode.window.showErrorMessage('Script execution failed: ' + (err instanceof Error ? err.message : String(err)));
-            }
-        }),
-        vscode.commands.registerCommand('syncfiles.runScriptInTerminal', async (item: ScriptItemTreeItem) => {
-            if (!(item instanceof ScriptItemTreeItem)) {
-                vscode.window.showErrorMessage('SyncFiles: Invalid script item for terminal execution.');
-                return;
-            }
-
-            const scriptConfig = item.scriptConfig;
-            const pythonExecutable = getPythonExecutablePath(workspacePath);
-            const pythonScriptDirSetting = getPythonScriptPath(workspacePath); // 这是从配置中读取的原始值
-            let baseScriptPath: string;
-
-            if (path.isAbsolute(pythonScriptDirSetting)) {
-                baseScriptPath = pythonScriptDirSetting;
-            } else {
-                baseScriptPath = path.join(workspacePath, pythonScriptDirSetting);
-            }
-            const absoluteScriptPath = path.join(baseScriptPath, scriptConfig.path);
-
-            console.log(`[Terminal Exec DEBUG] Python Script Dir Setting (from config): "${pythonScriptDirSetting}"`);
-            console.log(`[Terminal Exec DEBUG] Resolved Base Script Path: "${baseScriptPath}"`);
-            console.log(`[Terminal Exec DEBUG] Script Config Path (from item): "${scriptConfig.path}"`);
-            console.log(`[Terminal Exec DEBUG] Final Constructed Absolute Script Path: "${absoluteScriptPath}"`);
-            if (!pythonExecutable) {
-                vscode.window.showErrorMessage('SyncFiles: Python executable path not configured.');
-                return;
-            }
-            if (!fs.existsSync(absoluteScriptPath)) {
-                vscode.window.showErrorMessage(`SyncFiles: Script file not found: ${absoluteScriptPath}`);
-                return;
-            }
-
-            const termName = `Run: ${scriptConfig.alias || path.basename(scriptConfig.path)}`;
+                await executePythonScript(workspacePath, resolvedPythonExecutable, scriptPathForExecution, [], { showNotifications: true, showErrorModal: true, successMessage: `Script '${scriptName}' (Background API) executed successfully.` });
+            } catch (e) { /* executePythonScript handles errors */ }
+        } else { // terminal
+            const termName = `Run: ${scriptName}`;
             let terminal = vscode.window.terminals.find(t => t.name === termName);
-            if (terminal && (await vscode.window.showWarningMessage(`Terminal "${termName}" already exists. Reuse it?`, "Reuse", "Create New")) === "Create New") {
-                terminal.dispose();
-                terminal = undefined;
+            if (terminal) {
+                const action = await vscode.window.showWarningMessage(`Terminal "${termName}" is active.`, { modal: true }, "Reuse Terminal", "Close and Create New");
+                if (action === "Close and Create New") { terminal.dispose(); terminal = undefined; }
+                else if (action !== "Reuse Terminal") return;
             }
             if (!terminal) {
-                const terminalEnv: { [key: string]: string | null } = {};
-                const configEnvVars = getEnvVars(workspacePath);
-                configEnvVars.forEach((value, key) => {
-                    terminalEnv[key] = value;
-                });
-                terminal = vscode.window.createTerminal({ name: termName, env: terminalEnv });
+                const env: { [key: string]: string | undefined } = { ...process.env };
+                getEnvVars(workspacePath).forEach((v, k) => { env[k] = v; });
+                terminal = vscode.window.createTerminal({ name: termName, env, cwd: workspacePath });
             }
-            
-            // Ensure path quoting for safety
-            const command = `"${pythonExecutable}" "${absoluteScriptPath}"`;
-            terminal.sendText(command); // sendText automatically adds newline/CR based on OS if needed.
+            const quotedExec = resolvedPythonExecutable.includes(' ') && !resolvedPythonExecutable.startsWith('"') ? `"${resolvedPythonExecutable}"` : resolvedPythonExecutable;
+            const quotedScript = scriptPathForExecution.includes(' ') && !scriptPathForExecution.startsWith('"') ? `"${scriptPathForExecution}"` : scriptPathForExecution;
+            const command = `${quotedExec} ${quotedScript}`;
+            terminal.sendText(command, true);
             terminal.show();
-        })
-    );
+        }
+    };
 
-    // Script Group Management Commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('syncfiles.createScriptGroup', async () => {
-            const groupName = await vscode.window.showInputBox({ prompt: 'Enter new script group name' });
-            if (groupName) {
-                const newGroup: ScriptGroupConfig = {
-                    id: generateUUID(),
-                    name: groupName,
-                    scripts: []
-                };
-                await addScriptGroup(workspacePath, newGroup);
-                viewProvider.refresh();
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.runScriptVSCodeAPI', (itemOrPath) => executeScriptSharedLogic(itemOrPath, 'api')));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.runScriptInTerminal', (item) => executeScriptSharedLogic(item, 'terminal')));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.runScriptDefault', (item: ScriptItemTreeItem) => {
+        if (!(item instanceof ScriptItemTreeItem)) { vscode.window.showErrorMessage('Invalid item for default run.'); return; }
+        const mode = item.scriptConfig.executionMode || 'directTerminal';
+        executeScriptSharedLogic(item, mode === 'directTerminal' ? 'terminal' : 'api');
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.createScriptGroup', async () => { const n = await vscode.window.showInputBox({prompt:'Enter new script group name'}); if(n) {await addScriptGroupToConfig(workspacePath, {id:generateUUID(),name:n,scripts:[]}); await vscode.commands.executeCommand('syncfiles.refreshTreeView');} }));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.renameScriptGroup', async (i:ScriptGroupTreeItem) => { if(!(i instanceof ScriptGroupTreeItem))return; const n=await vscode.window.showInputBox({value:i.groupConfig.name,prompt:'Enter new group name'}); if(n&&n!==i.groupConfig.name){await updateScriptGroupInConfig(workspacePath,{...i.groupConfig,name:n}); await vscode.commands.executeCommand('syncfiles.refreshTreeView');}}));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.deleteScriptGroup', async (i:ScriptGroupTreeItem) => { 
+        if(!(i instanceof ScriptGroupTreeItem))return; 
+        if(i.groupConfig.id===DEFAULT_SCRIPT_GROUP_ID){
+            const c=await vscode.window.showWarningMessage(`This will clear all scripts from the '${i.groupConfig.name}' group. They will become unassigned. Continue?`,{modal:true},"Clear Scripts"); 
+            if(c==="Clear Scripts"){
+                let cfg=readConfig(workspacePath);
+                const g=cfg.scriptGroups.find(x=>x.id===DEFAULT_SCRIPT_GROUP_ID);
+                if(g)g.scripts=[];
+                await saveFullConfig(workspacePath,cfg);
             }
-        }),
-        vscode.commands.registerCommand('syncfiles.renameScriptGroup', async (item: ScriptGroupTreeItem) => {
-            if (!(item instanceof ScriptGroupTreeItem)) return;
-            const newName = await vscode.window.showInputBox({ value: item.groupConfig.name, prompt: 'Enter new group name' });
-            if (newName && newName !== item.groupConfig.name) {
-                const updatedGroup = { ...item.groupConfig, name: newName };
-                await updateScriptGroup(workspacePath, updatedGroup);
-                viewProvider.refresh();
-            }
-        }),
-        vscode.commands.registerCommand('syncfiles.deleteScriptGroup', async (item: ScriptGroupTreeItem) => {
-            if (!(item instanceof ScriptGroupTreeItem)) return;
-            const confirm = await vscode.window.showWarningMessage(`Are you sure you want to delete group "${item.groupConfig.name}"? Scripts within it will become ungrouped.`, { modal: true }, 'Delete');
-            if (confirm === 'Delete') {
-                await removeScriptGroup(workspacePath, item.groupConfig.id);
-                viewProvider.refresh();
-            }
-        })
-    );
+        } else {
+            const c=await vscode.window.showWarningMessage(`Delete group "${i.groupConfig.name}"? Scripts inside will become unassigned.`,{modal:true},"Delete Group"); 
+            if(c==="Delete Group") await removeScriptGroupAndSave(workspacePath,i.groupConfig.id);
+        } 
+        await vscode.commands.executeCommand('syncfiles.refreshTreeView');
+    }));
 
-    // Script Item Management Commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('syncfiles.addScriptToGroup', async (item: ScriptGroupTreeItem | UngroupedScriptFileTreeItem) => {
-            let targetGroupId: string | undefined;
-            let preselectedScriptPath: string | undefined;
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.addScriptToGroup', async (targetItemOrContext:ScriptGroupTreeItem|any) => { 
+        let targetGroupId:string; 
+        if(targetItemOrContext instanceof ScriptGroupTreeItem) {
+            targetGroupId=targetItemOrContext.groupConfig.id;
+        } else {
+            const groups=getScriptGroups(workspacePath).map(g=>({label:g.name,id:g.id,description:g.id===DEFAULT_SCRIPT_GROUP_ID?"(Default)":`(${(g.scripts||[]).length})`}));
+            if(!groups.length){vscode.window.showInformationMessage("No groups exist.");return;}
+            const chosenGroup=await vscode.window.showQuickPick(groups,{placeHolder:"Select group"});
+            if(!chosenGroup)return;
+            targetGroupId=chosenGroup.id;
+        } 
+        const pythonScriptDirSetting=getPythonScriptPath(workspacePath);
+        if(!pythonScriptDirSetting){vscode.window.showErrorMessage("Python script path not set.");return;}
+        const resolvedDir=ensureAbsolute(pythonScriptDirSetting,workspacePath);
+        if(!fs.existsSync(resolvedDir)||!fs.statSync(resolvedDir).isDirectory()){vscode.window.showErrorMessage(`Script directory not found: ${resolvedDir}`);return;}
+        
+        const currentConfigForPaths = readConfig(workspacePath);
+        const assigned=getAllAssignedScriptPaths(currentConfigForPaths);
 
-            if (item instanceof ScriptGroupTreeItem) {
-                targetGroupId = item.groupConfig.id;
-            } else if (item instanceof UngroupedScriptFileTreeItem) {
-                // If adding from an ungrouped item, ask which group to add to
-                const groups = getScriptGroups(workspacePath);
-                if (groups.length === 0) {
-                    vscode.window.showInformationMessage("No script groups available. Please create one first.");
-                    return;
-                }
-                const pickedGroup = await vscode.window.showQuickPick(
-                    groups.map(g => ({ label: g.name, id: g.id })),
-                    { placeHolder: "Select a group to add the script to" }
-                );
-                if (!pickedGroup) return;
-                targetGroupId = pickedGroup.id;
-                preselectedScriptPath = item.scriptPath;
-            }
+        const available=fs.readdirSync(resolvedDir).filter(f=>f.toLowerCase().endsWith('.py')&&!fs.statSync(path.join(resolvedDir,f)).isDirectory()&&!assigned.has(f)).map(f=>({label:f,filePath:f}));
+        if(!available.length){vscode.window.showInformationMessage("No new, unassigned scripts found to add.");return;}
+        const picked=await vscode.window.showQuickPick(available,{placeHolder:"Select script"});
+        if(!picked)return;
+        const alias=await vscode.window.showInputBox({prompt:`Alias for "${picked.label}"?`});if(alias===undefined)return;
+        const desc=await vscode.window.showInputBox({prompt:`Description for "${picked.label}"?`});if(desc===undefined)return;
+        
+        await addScriptToGroupAndSave(workspacePath,targetGroupId,{id:generateUUID(),path:picked.filePath,alias:alias||undefined,description:desc||undefined,executionMode:'directTerminal'});
+        await vscode.commands.executeCommand('syncfiles.refreshTreeView');
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.editScriptDetails', async (i:ScriptItemTreeItem) => { if(!(i instanceof ScriptItemTreeItem))return;const o=i.scriptConfig;const na=await vscode.window.showInputBox({value:o.alias||'',prompt:'New alias'});if(na===undefined)return;const nd=await vscode.window.showInputBox({value:o.description||'',prompt:'New description'});if(nd===undefined)return;await updateScriptInGroupAndSave(workspacePath,i.parentGroupConfig.id,{...o,alias:na||undefined,description:nd||undefined});await vscode.commands.executeCommand('syncfiles.refreshTreeView');}));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.setScriptExecutionMode', async (i:ScriptItemTreeItem) => { if(!(i instanceof ScriptItemTreeItem))return;const p=await vscode.window.showQuickPick([{label:"Run in Terminal",description:"Default for new scripts. Interactive output.",mode:'directTerminal'as const},{label:"Run with Background API",description:"Silent execution via VSCode API.",mode:'vscodeApi'as const}],{placeHolder:"Select execution method"});if(!p)return;await updateScriptInGroupAndSave(workspacePath,i.parentGroupConfig.id,{...i.scriptConfig,executionMode:p.mode});await vscode.commands.executeCommand('syncfiles.refreshTreeView');}));
+    
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.removeScriptFromGroup', async (i:ScriptItemTreeItem) => { 
+        if(!(i instanceof ScriptItemTreeItem))return;
+        const c=await vscode.window.showWarningMessage(`Remove "${i.label}" from "${i.parentGroupConfig.name}"? Script will become unassigned.`,{modal:true},"Remove");
+        if(c==="Remove"){
+            let cfg=readConfig(workspacePath); 
+            const g=cfg.scriptGroups.find(x=>x.id===i.parentGroupConfig.id); 
+            if(g&&g.scripts)g.scripts=g.scripts.filter(s=>s.id!==i.scriptConfig.id); 
+            await saveFullConfig(workspacePath,cfg); 
+            await vscode.commands.executeCommand('syncfiles.refreshTreeView');
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.moveScriptToGroup', async (i:ScriptItemTreeItem) => { 
+        if(!(i instanceof ScriptItemTreeItem))return;
+        const s=i.scriptConfig;const sgid=i.parentGroupConfig.id;
+        const ags=getScriptGroups(workspacePath).filter(g=>g.id!==sgid).map(g=>({label:g.name,id:g.id}));
+        if(!ags.length){vscode.window.showInformationMessage("No other groups.");return;}
+        const pg=await vscode.window.showQuickPick(ags,{placeHolder:"Select new group"});
+        if(!pg)return;
+        let cfg=readConfig(workspacePath);
+        const og=cfg.scriptGroups.find(x=>x.id===sgid);
+        const ng=cfg.scriptGroups.find(x=>x.id===pg.id);
+        if(og&&ng){
+            if(og.scripts)og.scripts=og.scripts.filter(x=>x.id!==s.id);
+            if(!ng.scripts)ng.scripts=[];
+            if(!ng.scripts.some(x=>x.path===s.path))ng.scripts.push(s);
+            else vscode.window.showWarningMessage("Script path exists in target group.");
+            await saveFullConfig(workspacePath,cfg);
+            await vscode.commands.executeCommand('syncfiles.refreshTreeView');
+        }
+    }));
 
-            if (!targetGroupId) {
-                 const groups = getScriptGroups(workspacePath);
-                 if (groups.length === 0) {
-                     vscode.window.showInformationMessage("No script groups available to add to. Create one first.");
-                     return;
-                 }
-                 const chosenGroup = await vscode.window.showQuickPick(groups.map(g => ({label: g.name, id: g.id})), {placeHolder: "Select group to add script to"});
-                 if (!chosenGroup) return;
-                 targetGroupId = chosenGroup.id;
-            }
+    const setScriptClickAction = async (action: 'doNothing' | 'openFile' | 'executeDefault') => {
+        try {
+            await vscode.workspace.getConfiguration('syncfiles.view').update('scriptClickAction', action, vscode.ConfigurationTarget.Workspace);
+            vscode.window.showInformationMessage(`Script left-click action set to: '${action}'.`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to set click action: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    };
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.setClickAction.doNothing', () => setScriptClickAction('doNothing')));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.setClickAction.openFile', () => setScriptClickAction('openFile')));
+    context.subscriptions.push(vscode.commands.registerCommand('syncfiles.setClickAction.executeDefault', () => setScriptClickAction('executeDefault')));
 
-
-            const pythonScriptDir = getPythonScriptPath(workspacePath);
-            if (!pythonScriptDir) {
-                vscode.window.showErrorMessage('SyncFiles: Python script path not set.');
-                return;
-            }
-            const fullScriptDirPath = path.resolve(workspacePath, pythonScriptDir);
-            if (!fs.existsSync(fullScriptDirPath) || !fs.statSync(fullScriptDirPath).isDirectory()) {
-                 vscode.window.showErrorMessage(`SyncFiles: Python script directory not found: ${fullScriptDirPath}`);
-                return;
-            }
-
-            const assignedPaths = getAllAssignedScriptPaths(workspacePath);
-            const availableScripts = fs.readdirSync(fullScriptDirPath)
-                .filter(file => file.toLowerCase().endsWith('.py') && !fs.statSync(path.join(fullScriptDirPath, file)).isDirectory() && !assignedPaths.has(file))
-                .map(file => ({ label: file, description: `Add ${file} to group` , filePath: file }));
-
-            if (availableScripts.length === 0 && !preselectedScriptPath) {
-                vscode.window.showInformationMessage('SyncFiles: No new scripts available to add (all .py files in the script directory are already in groups).');
-                return;
-            }
-            
-            let scriptPathToAdd: string | undefined = preselectedScriptPath;
-
-            if (!scriptPathToAdd) {
-                const pickedScript = await vscode.window.showQuickPick(availableScripts, { placeHolder: 'Select a script to add' });
-                if (!pickedScript) return;
-                scriptPathToAdd = pickedScript.filePath;
-            }
-            
-            if (!scriptPathToAdd) return; // Should not happen if logic is correct
-
-            const alias = await vscode.window.showInputBox({ prompt: `Enter an alias for "${path.basename(scriptPathToAdd)}" (optional, press Enter for default)` });
-            const description = await vscode.window.showInputBox({ prompt: `Enter a description for "${path.basename(scriptPathToAdd)}" (optional)` });
-
-            const newScriptItem: ScriptItemConfig = {
-                id: generateUUID(),
-                path: scriptPathToAdd, // Relative to pythonScriptPath
-                alias: alias || undefined,
-                description: description || undefined,
-                executionMode: 'vscodeApi' // Default execution mode
-            };
-
-            await addScriptToGroup(workspacePath, targetGroupId, newScriptItem);
-            viewProvider.refresh();
-        }),
-
-        vscode.commands.registerCommand('syncfiles.editScriptDetails', async (item: ScriptItemTreeItem) => {
-            if (!(item instanceof ScriptItemTreeItem) || !item.parentGroupConfig) return;
-
-            const oldConf = item.scriptConfig;
-            const newAlias = await vscode.window.showInputBox({
-                prompt: 'Enter new alias (or leave blank to remove)',
-                value: oldConf.alias || ''
-            });
-            const newDescription = await vscode.window.showInputBox({
-                prompt: 'Enter new description (or leave blank to remove)',
-                value: oldConf.description || ''
-            });
-
-            if (newAlias !== undefined && newDescription !== undefined) { // Check if user didn't cancel
-                const updatedScriptItem: ScriptItemConfig = {
-                    ...oldConf,
-                    alias: newAlias || undefined,
-                    description: newDescription || undefined
-                };
-                await updateScriptInGroup(workspacePath, item.parentGroupConfig.id, updatedScriptItem);
-                viewProvider.refresh();
-            }
-        }),
-        vscode.commands.registerCommand('syncfiles.setScriptExecutionMode', async (item: ScriptItemTreeItem, mode?: 'vscodeApi' | 'directTerminal') => {
-            if (!(item instanceof ScriptItemTreeItem) || !item.parentGroupConfig) return;
-
-            let chosenMode = mode;
-            if (!chosenMode) {
-                const pick = await vscode.window.showQuickPick([
-                    { label: "VSCode API (Background)", description: "Runs script using VSCode's internal execution, good for quick tasks.", mode: 'vscodeApi' as const },
-                    { label: "Direct Terminal Call", description: "Runs script in a new VSCode terminal, good for interactive scripts or visible output.", mode: 'directTerminal' as const }
-                ], { placeHolder: "Select default execution mode for this script" });
-                if (!pick) return;
-                chosenMode = pick.mode;
-            }
-            
-            const updatedScriptItem: ScriptItemConfig = { ...item.scriptConfig, executionMode: chosenMode };
-            await updateScriptInGroup(workspacePath, item.parentGroupConfig.id, updatedScriptItem);
-            viewProvider.refresh();
-            vscode.window.showInformationMessage(`Default execution for '${item.label}' set to ${chosenMode === 'directTerminal' ? 'Direct Terminal' : 'VSCode API'}.`);
-        }),
-
-        vscode.commands.registerCommand('syncfiles.runScriptDefault', async (item: ScriptItemTreeItem) => {
-            if (!(item instanceof ScriptItemTreeItem)) return;
-            const mode = item.scriptConfig.executionMode || 'vscodeApi'; // Default to vscodeApi if not set
-            if (mode === 'directTerminal') {
-                vscode.commands.executeCommand('syncfiles.runScriptInTerminal', item);
-            } else {
-                vscode.commands.executeCommand('syncfiles.runScriptVSCodeAPI', item);
-            }
-        }),
-
-        vscode.commands.registerCommand('syncfiles.removeScriptFromGroup', async (item: ScriptItemTreeItem) => {
-            if (!(item instanceof ScriptItemTreeItem) || !item.parentGroupConfig) return;
-            const confirm = await vscode.window.showWarningMessage(`Are you sure you want to remove "${item.label}" from group "${item.parentGroupConfig.name}"? It will become an ungrouped script.`, { modal: true }, 'Remove');
-            if (confirm === 'Remove') {
-                await removeScriptFromGroup(workspacePath, item.parentGroupConfig.id, item.scriptConfig.id);
-                viewProvider.refresh();
-            }
-        }),
-        vscode.commands.registerCommand('syncfiles.moveScriptToGroup', async (item: ScriptItemTreeItem) => {
-            if (!(item instanceof ScriptItemTreeItem) || !item.parentGroupConfig) return;
-
-            const currentGroupId = item.parentGroupConfig.id;
-            const scriptToMove = item.scriptConfig;
-
-            const availableGroups = getScriptGroups(workspacePath)
-                .filter(g => g.id !== currentGroupId) // Exclude current group
-                .map(g => ({ label: g.name, id: g.id }));
-
-            if (availableGroups.length === 0) {
-                vscode.window.showInformationMessage('SyncFiles: No other groups available to move the script to.');
-                return;
-            }
-
-            const pickedGroup = await vscode.window.showQuickPick(availableGroups, { placeHolder: 'Select a new group for the script' });
-            if (!pickedGroup) return;
-
-            // Atomically remove from old and add to new
-            const config = readConfig(workspacePath);
-            const oldGroup = config.scriptGroups.find(g => g.id === currentGroupId);
-            const newGroup = config.scriptGroups.find(g => g.id === pickedGroup.id);
-
-            if (oldGroup && newGroup) {
-                oldGroup.scripts = oldGroup.scripts.filter(s => s.id !== scriptToMove.id);
-                newGroup.scripts.push(scriptToMove); // Add the original script item object
-                await saveFullConfig(workspacePath, config); // Save the whole config once
-                viewProvider.refresh();
-            } else {
-                vscode.window.showErrorMessage('SyncFiles: Error finding source or destination group.');
-            }
-        })
-    );
-
-    // Initialize watcher
-    startWatching(workspacePath, () => {
-        viewProvider.refresh();
-    });
+    startWatching(workspacePath, async () => { await vscode.commands.executeCommand('syncfiles.refreshTreeView'); });
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
+        const affects = (key: string) => event.affectsConfiguration(`syncfiles.${key}`);
+        if (affects('scripts.defaultGroupName') || affects('view.scriptClickAction') || affects('pythonScriptPath') || affects('pythonExecutablePath')) {
+            console.log("[SyncFiles] Relevant configuration changed, triggering refresh and sync.");
+            await vscode.commands.executeCommand('syncfiles.refreshTreeView'); // This will call refreshAndSyncConfig
+        }
+    }));
 }
 
 export function deactivate() {
