@@ -111,10 +111,21 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const scriptConfig = item.scriptConfig;
-            const pythonScriptDir = getPythonScriptPath(workspacePath);
-            const absoluteScriptPath = path.join(workspacePath, pythonScriptDir, scriptConfig.path);
             const pythonExecutable = getPythonExecutablePath(workspacePath);
+            const pythonScriptDirSetting = getPythonScriptPath(workspacePath); // 这是从配置中读取的原始值
+            let baseScriptPath: string;
 
+            if (path.isAbsolute(pythonScriptDirSetting)) {
+                baseScriptPath = pythonScriptDirSetting;
+            } else {
+                baseScriptPath = path.join(workspacePath, pythonScriptDirSetting);
+            }
+            const absoluteScriptPath = path.join(baseScriptPath, scriptConfig.path);
+
+            console.log(`[Terminal Exec DEBUG] Python Script Dir Setting (from config): "${pythonScriptDirSetting}"`);
+            console.log(`[Terminal Exec DEBUG] Resolved Base Script Path: "${baseScriptPath}"`);
+            console.log(`[Terminal Exec DEBUG] Script Config Path (from item): "${scriptConfig.path}"`);
+            console.log(`[Terminal Exec DEBUG] Final Constructed Absolute Script Path: "${absoluteScriptPath}"`);
             if (!pythonExecutable) {
                 vscode.window.showErrorMessage('SyncFiles: Python executable path not configured.');
                 return;

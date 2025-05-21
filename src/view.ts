@@ -23,6 +23,7 @@ export class ScriptItemTreeItem extends vscode.TreeItem {
         private readonly workspaceRoot: string,
         private readonly pythonScriptRootPath: string // Relative path from workspace root to python scripts folder
     ) {
+        
         const baseName = path.basename(scriptConfig.path);
         const displayLabel = scriptConfig.alias || baseName.replace(/\.py$/i, '');
         super(displayLabel, vscode.TreeItemCollapsibleState.None);
@@ -30,8 +31,22 @@ export class ScriptItemTreeItem extends vscode.TreeItem {
         this.id = scriptConfig.id;
         this.description = scriptConfig.alias ? baseName.replace(/\.py$/i, '') : scriptConfig.description;
         this.tooltip = `${scriptConfig.path}${scriptConfig.description ? `\n${scriptConfig.description}` : ''}`;
-        
-        const absoluteScriptPath = path.join(this.workspaceRoot, this.pythonScriptRootPath, scriptConfig.path);
+        let baseScriptPathForTree: string;
+
+        if (path.isAbsolute(this.pythonScriptRootPath)) {
+            baseScriptPathForTree = this.pythonScriptRootPath;
+        } else {
+            baseScriptPathForTree = path.join(this.workspaceRoot, this.pythonScriptRootPath);
+        }
+        const absoluteScriptPath = path.join(baseScriptPathForTree, this.scriptConfig.path);
+
+        console.log(`[TreeItem DEBUG] Python Script Root Path (from config via view): "${this.pythonScriptRootPath}"`);
+        console.log(`[TreeItem DEBUG] Resolved Base Script Path for Tree: "${baseScriptPathForTree}"`);
+        console.log(`[TreeItem DEBUG] Script Config Path (from item config): "${this.scriptConfig.path}"`);
+        console.log(`[TreeItem DEBUG] Final Constructed Absolute Script Path for URI: "${absoluteScriptPath}"`);
+
+        this.resourceUri = vscode.Uri.file(absoluteScriptPath);
+
         this.resourceUri = vscode.Uri.file(absoluteScriptPath);
 
         this.contextValue = 'scriptItem';
