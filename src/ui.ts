@@ -320,7 +320,7 @@ function getWebviewContent(): string {
                 <thead>
                     <tr>
                         <th>Path to Watch (File or Directory)</th>
-                        <th>Python Script on Delete</th>
+                        <th>Python Script</th>
                         <th>Action</th>
                     </tr>
                 </thead>
