@@ -1,7 +1,9 @@
+// watcher.ts
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getPythonScriptPath, getWatchEntries, getPythonExecutablePath, WatchEntry } from './config';
+// MODIFIED: Added getConfigFilePath to imports
+import { getPythonScriptPath, getWatchEntries, getPythonExecutablePath, WatchEntry, getConfigFilePath } from './config';
 import { executePythonScript } from './python';
 
 const activeWatchers: Map<string, vscode.FileSystemWatcher> = new Map();
@@ -18,9 +20,9 @@ function addWatcherInstance(key: string, watcher: vscode.FileSystemWatcher) {
 
 export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => void): void {
     console.log(`[Watcher] startWatching called. Workspace: ${workspacePath}`);
-    stopWatching();
+    stopWatching(); // Clears all existing watchers before creating new ones
 
-    // 1. Watch Python Scripts Directory for Tree View updates
+    // 1. Watch Python Scripts Directory for Tree View updates (existing logic)
     const treeViewScriptDirPath = getPythonScriptPath(workspacePath);
     console.log(`[Watcher] Config - TreeView Script Dir Path: "${treeViewScriptDirPath}"`);
     if (treeViewScriptDirPath) {
@@ -32,9 +34,9 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
             );
             console.log(`[Watcher] Created FileSystemWatcher for TreeView scripts: Pattern base "${absoluteTreeViewScriptDirPath}", pattern "**/*.py"`);
 
-            const onChangeHandler = (uri?: vscode.Uri) => { // Add uri parameter for logging
+            const onChangeHandler = (uri?: vscode.Uri) => {
                 const eventUri = uri ? uri.fsPath : 'N/A';
-                console.log(`[Watcher Event] Change detected in Python script directory: ${absoluteTreeViewScriptDirPath}. Event URI: ${eventUri}`);
+                console.log(`[Watcher Event] Change detected in Python script directory: ${absoluteTreeViewScriptDirPath}. Event URI: ${eventUri}. Triggering tree refresh.`);
                 onTreeRefreshNeeded();
             };
             scriptDirWatcher.onDidChange(onChangeHandler);
@@ -49,16 +51,15 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
         console.log('[Watcher] No Python script directory configured for tree view watching.');
     }
 
-    // 2. Watch specific paths for deletion events (and other events in modified versions)
+    // 2. Watch specific paths for deletion events (and other events) (existing logic)
     const watchEntries = getWatchEntries(workspacePath);
     console.log(`[Watcher] Config - Watch Entries: ${JSON.stringify(watchEntries, null, 2)}`);
     const pythonExecutable = getPythonExecutablePath(workspacePath);
     console.log(`[Watcher] Config - Python Executable Path: "${pythonExecutable}"`);
 
-    if (!pythonExecutable && watchEntries.some(entry => entry.onEventScript)) { // Check if any script is configured
+    if (!pythonExecutable && watchEntries.some(entry => entry.onEventScript)) {
         console.warn('[Watcher] Python executable path not configured. Watchers that trigger Python scripts might not function.');
     }
-
     if (!watchEntries || watchEntries.length === 0) {
         console.log('[Watcher] No custom watch entries configured.');
     }
@@ -67,10 +68,8 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
         console.log(`[Watcher] Processing Watch Entry #${index}: Path="${entry.watchedPath}", Script="${entry.onEventScript}"`);
         if (!entry.watchedPath) {
             console.warn(`[Watcher] Watch Entry #${index} has no watchedPath configured. Skipping.`);
-            return; // Skip this entry if watchedPath is empty
+            return;
         }
-        // onEventScript can be empty if no script is intended for this watcher.
-
         const absoluteWatchedPath = path.resolve(workspacePath, entry.watchedPath);
         console.log(`[Watcher] Entry #${index} - Resolved Watched Absolute Path: "${absoluteWatchedPath}"`);
         
@@ -80,17 +79,13 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
             console.log(`[Watcher] Entry #${index} - Resolved Script Absolute Path: "${absoluteOnEventScriptPath}"`);
         }
 
-
         if (!fs.existsSync(absoluteWatchedPath)) {
             console.warn(`[Watcher] Entry #${index} - Watched path does not exist, cannot watch: ${absoluteWatchedPath}`);
             return;
         }
-
-        // Script existence checks (only if a script is configured)
         if (entry.onEventScript) {
             if (!pythonExecutable) {
                 console.warn(`[Watcher] Entry #${index} - Cannot run script for ${absoluteWatchedPath}: Python executable not set.`);
-                // Don't return yet, watcher might still be useful for logging or future non-script actions
             }
             if (absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
                 console.warn(`[Watcher] Entry #${index} - Script path does not exist for ${absoluteWatchedPath}: ${absoluteOnEventScriptPath}`);
@@ -102,23 +97,16 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
         try {
             const stats = fs.statSync(absoluteWatchedPath);
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(absoluteWatchedPath));
-            
             if (!workspaceFolder) {
                  console.warn(`[Watcher] Entry #${index} - Cannot create watcher: Path ${absoluteWatchedPath} is not within an open workspace folder.`);
                  return;
             }
-            const relativePathFromWorkspace = path.relative(workspaceFolder.uri.fsPath, absoluteWatchedPath);
-
             if (stats.isDirectory()) {
                 isDirectoryWatch = true;
-                // globPattern = new vscode.RelativePattern(workspaceFolder, path.join(relativePathFromWorkspace, '**/*')); // Original method
-                // Using the direct URI method which is often more robust for directories:
                 const watchedDirUri = vscode.Uri.file(absoluteWatchedPath);
-                globPattern = new vscode.RelativePattern(watchedDirUri, '**'); // Monitor all content recursively
+                globPattern = new vscode.RelativePattern(watchedDirUri, '**');
                 console.log(`[Watcher] Entry #${index} - Setting up DIRECTORY watch. Base URI: ${watchedDirUri.toString()}, Pattern: "**"`);
-            } else { // Is a file
-                // globPattern = new vscode.RelativePattern(workspaceFolder, relativePathFromWorkspace); // Original method
-                // Using the direct URI method for files too:
+            } else {
                 const watchedFileDirUri = vscode.Uri.file(path.dirname(absoluteWatchedPath));
                 const watchedFileName = path.basename(absoluteWatchedPath);
                 globPattern = new vscode.RelativePattern(watchedFileDirUri, watchedFileName);
@@ -129,37 +117,22 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
             return;
         }
 
-        // Naming the watcher based on the original config for clarity
-        const watcherKey = `pathWatcher_${entry.watchedPath.replace(/[/\\]/g, '_')}`; // Sanitize path for key
-        const pathWatcher = vscode.workspace.createFileSystemWatcher(globPattern, false, false, false); //Explicitly don't ignore any event types
+        const watcherKey = `pathWatcher_${entry.watchedPath.replace(/[/\\]/g, '_')}`;
+        const pathWatcher = vscode.workspace.createFileSystemWatcher(globPattern, false, false, false);
         console.log(`[Watcher] Entry #${index} - Created FileSystemWatcher with key ${watcherKey}. Base: "${globPattern.baseUri.toString()}", Pattern: "${globPattern.pattern}"`);
 
-        // Generic event handler function
         const handleFileSystemEvent = async (eventType: string, uri: vscode.Uri) => {
             console.log(`[Watcher Event] ${eventType} detected by watcher for base "${globPattern.baseUri.toString()}" with pattern "${globPattern.pattern}". Event URI: ${uri.fsPath}. Configured watch: ${entry.watchedPath}`);
-
-            // Check if the event URI is within the watched directory (if it's a directory watch)
-            // This is an extra sanity check; the glob pattern should ideally handle this.
             if (isDirectoryWatch && !uri.fsPath.startsWith(absoluteWatchedPath + path.sep) && uri.fsPath !== absoluteWatchedPath) {
                 console.log(`[Watcher Event] ${eventType} URI ${uri.fsPath} is outside watched directory ${absoluteWatchedPath}. Glob: pattern "${globPattern.pattern}", base "${globPattern.baseUri.toString()}". Ignoring script call based on this check.`);
-                // return; // You might decide to return here if you are sure glob should prevent this.
             }
-
             if (entry.onEventScript && pythonExecutable && absoluteOnEventScriptPath && fs.existsSync(absoluteOnEventScriptPath)) {
                 try {
-                    // Map eventType to script argument (e.g., "Change Del", "Change Mod", "Change New")
                     let scriptArgEventType = "Unknown Event";
                     if (eventType === "DELETION") scriptArgEventType = "Change Del";
                     else if (eventType === "MODIFICATION") scriptArgEventType = "Change Mod";
                     else if (eventType === "CREATION") scriptArgEventType = "Change New";
-                    
-                    await executePythonScript(
-                        workspacePath,
-                        pythonExecutable,
-                        absoluteOnEventScriptPath,
-                        [scriptArgEventType, uri.fsPath],
-                        {showNotifications:false}
-                    );
+                    await executePythonScript(workspacePath, pythonExecutable, absoluteOnEventScriptPath, [scriptArgEventType, uri.fsPath], {showNotifications:false});
                 } catch (err) {
                     console.error(`[Watcher] Error executing script for ${eventType} on ${uri.fsPath}:`, err);
                 }
@@ -169,14 +142,41 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
                  console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Script ${entry.onEventScript} not found.`);
             }
         };
-        
         pathWatcher.onDidCreate((uri) => handleFileSystemEvent("CREATION", uri));
         pathWatcher.onDidChange((uri) => handleFileSystemEvent("MODIFICATION", uri));
         pathWatcher.onDidDelete((uri) => handleFileSystemEvent("DELETION", uri));
-        
         addWatcherInstance(watcherKey, pathWatcher);
         console.log(`[Watcher] Entry #${index} - Now watching for C/U/D on base: ${globPattern.baseUri.toString()}, pattern: ${globPattern.pattern} -> script: ${entry.onEventScript || 'None'}`);
     });
+
+    // --- NEW SECTION: Watch the syncfiles.json config file itself ---
+    const configFilePathString = getConfigFilePath(workspacePath);
+    const configFileUri = vscode.Uri.file(configFilePathString);
+    console.log(`[Watcher] Attempting to watch config file: ${configFileUri.fsPath}`);
+
+    // Create a FileSystemWatcher for the specific config file.
+    // The base for RelativePattern should be the directory containing the file (.vscode).
+    // The pattern is the filename (syncfiles.json).
+    const configFileWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(vscode.Uri.file(path.dirname(configFileUri.fsPath)), path.basename(configFileUri.fsPath))
+    );
+    console.log(`[Watcher] Created FileSystemWatcher for config file: ${configFileUri.fsPath}`);
+
+    const handleConfigFileChange = (eventType: string, uri: vscode.Uri) => {
+        console.log(`[Watcher Event] Config file ${uri.fsPath} ${eventType}. Triggering full refresh.`);
+        // The onTreeRefreshNeeded callback should handle reading the new config and updating the UI.
+        // This callback is typically: async () => { await vscode.commands.executeCommand('syncfiles.refreshTreeView'); }
+        // which in turn calls refreshAndSyncConfig, which reads the config file.
+        onTreeRefreshNeeded();
+    };
+
+    configFileWatcher.onDidChange((uri) => handleConfigFileChange("changed (onDidChange)", uri));
+    configFileWatcher.onDidCreate((uri) => handleConfigFileChange("created (onDidCreate)", uri));
+    configFileWatcher.onDidDelete((uri) => handleConfigFileChange("deleted (onDidDelete)", uri));
+
+    addWatcherInstance('configFileWatcher_syncfiles.json', configFileWatcher); // Using a specific and unique key
+    console.log(`[Watcher] Now watching config file for C/U/D: ${configFileUri.fsPath}`);
+    // --- END NEW SECTION ---
 }
 
 export function stopWatching(): void {
