@@ -25,7 +25,11 @@
       "properties": {
         "syncfiles.view.scriptClickAction": {
           "type": "string",
-          "enum": ["doNothing", "openFile", "executeDefault"],
+          "enum": [
+            "doNothing",
+            "openFile",
+            "executeDefault"
+          ],
           "default": "doNothing",
           "description": "Defines the action when a script item is left-clicked. 'doNothing' (Default): No action (use right-click menu). 'openFile': Opens the script file. 'executeDefault': Runs the script's default execution method."
         },
@@ -37,62 +41,239 @@
       }
     },
     "commands": [
-      { "command": "syncfiles.syncAll", "title": "SyncFiles: Start Sync All Mappings", "category": "SyncFiles" },
-      { "command": "syncfiles.refreshTreeView", "title": "SyncFiles: Refresh Tree View", "category": "SyncFiles", "icon": "$(refresh)" },
-      { "command": "syncfiles.openSettings", "title": "SyncFiles: Open Settings Webview", "category": "SyncFiles", "icon": "$(settings-gear)" },
-      { "command": "syncfiles.openScriptFile", "title": "SyncFiles: Open Script File", "category": "SyncFiles" },
-      { "command": "syncfiles.runScriptVSCodeAPI", "title": "SyncFiles: Run Script (Background API)", "category": "SyncFiles", "icon": "$(run-all)" },
-      { "command": "syncfiles.runScriptInTerminal", "title": "SyncFiles: Run Script (In Terminal)", "category": "SyncFiles", "icon": "$(terminal)" },
-      { "command": "syncfiles.runScriptDefault", "title": "SyncFiles: Run Script (Using Default Method)", "category": "SyncFiles", "icon": "$(play)" },
-      { "command": "syncfiles.createScriptGroup", "title": "SyncFiles: Create New Script Group", "category": "SyncFiles", "icon": "$(add)" },
-      { "command": "syncfiles.renameScriptGroup", "title": "SyncFiles: Rename Script Group", "category": "SyncFiles", "icon": "$(edit)" },
-      { "command": "syncfiles.deleteScriptGroup", "title": "SyncFiles: Delete Script Group", "category": "SyncFiles", "icon": "$(trash)" },
-      { "command": "syncfiles.addScriptToGroup", "title": "SyncFiles: Add Script to Group...", "category": "SyncFiles", "icon": "$(file-add)" },
-      { "command": "syncfiles.editScriptDetails", "title": "SyncFiles: Configure Script (Alias/Description)", "category": "SyncFiles", "icon": "$(ellipsis)" },
-      { "command": "syncfiles.setScriptExecutionMode", "title": "SyncFiles: Set Default Execution Method...", "category": "SyncFiles" },
-      { "command": "syncfiles.removeScriptFromGroup", "title": "SyncFiles: Remove Script from Group", "category": "SyncFiles", "icon": "$(close)" },
-      { "command": "syncfiles.moveScriptToGroup", "title": "SyncFiles: Move Script to Another Group...", "category": "SyncFiles", "icon": "$(fold-up)" },
-      { "command": "syncfiles.setClickAction.doNothing", "title": "Set Click Action to: Do Nothing", "category": "SyncFiles" },
-      { "command": "syncfiles.setClickAction.openFile", "title": "Set Click Action to: Open File", "category": "SyncFiles" },
-      { "command": "syncfiles.setClickAction.executeDefault", "title": "Set Click Action to: Execute Default", "category": "SyncFiles" }
+      {
+        "command": "syncfiles.syncAll",
+        "title": "SyncFiles: Start Sync All Mappings",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.refreshTreeView",
+        "title": "SyncFiles: Refresh Tree View",
+        "category": "SyncFiles",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "syncfiles.openSettings",
+        "title": "SyncFiles: Open Settings Webview",
+        "category": "SyncFiles",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "syncfiles.openScriptFile",
+        "title": "SyncFiles: Open Script File",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.runScriptVSCodeAPI",
+        "title": "SyncFiles: Run Script (Background API)",
+        "category": "SyncFiles",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "syncfiles.runScriptInTerminal",
+        "title": "SyncFiles: Run Script (In Terminal)",
+        "category": "SyncFiles",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "syncfiles.runScriptDefault",
+        "title": "SyncFiles: Run Script (Using Default Method)",
+        "category": "SyncFiles",
+        "icon": "$(play)"
+      },
+      {
+        "command": "syncfiles.createScriptGroup",
+        "title": "SyncFiles: Create New Script Group",
+        "category": "SyncFiles",
+        "icon": "$(add)"
+      },
+      {
+        "command": "syncfiles.renameScriptGroup",
+        "title": "SyncFiles: Rename Script Group",
+        "category": "SyncFiles",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "syncfiles.deleteScriptGroup",
+        "title": "SyncFiles: Delete Script Group",
+        "category": "SyncFiles",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "syncfiles.addScriptToGroup",
+        "title": "SyncFiles: Add Script to Group...",
+        "category": "SyncFiles",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "syncfiles.editScriptDetails",
+        "title": "SyncFiles: Configure Script (Alias/Description)",
+        "category": "SyncFiles",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "syncfiles.setScriptExecutionMode",
+        "title": "SyncFiles: Set Default Execution Method...",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.removeScriptFromGroup",
+        "title": "SyncFiles: Remove Script from Group",
+        "category": "SyncFiles",
+        "icon": "$(close)"
+      },
+      {
+        "command": "syncfiles.moveScriptToGroup",
+        "title": "SyncFiles: Move Script to Another Group...",
+        "category": "SyncFiles",
+        "icon": "$(fold-up)"
+      },
+      {
+        "command": "syncfiles.setClickAction.doNothing",
+        "title": "Set Click Action to: Do Nothing",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.setClickAction.openFile",
+        "title": "Set Click Action to: Open File",
+        "category": "SyncFiles"
+      },
+      {
+        "command": "syncfiles.setClickAction.executeDefault",
+        "title": "Set Click Action to: Execute Default",
+        "category": "SyncFiles"
+      },
+      
+      {
+          "command": "syncfiles.loadWorkflow",
+          "title": "SyncFiles: Load Workflow from URL",
+          "category": "SyncFiles"
+      }
     ],
     "submenus": [
       {
         "id": "syncfiles.scriptClickActionSubmenu",
-        "label": "Set Left-Click Action" 
+        "label": "Set Left-Click Action"
       }
     ],
     "menus": {
       "view/title": [
-        { "command": "syncfiles.refreshTreeView", "when": "view == syncView", "group": "navigation" },
-        { "command": "syncfiles.openSettings", "when": "view == syncView", "group": "navigation@2" }
+        {
+          "command": "syncfiles.refreshTreeView",
+          "when": "view == syncView",
+          "group": "navigation"
+        },
+        {
+          "command": "syncfiles.openSettings",
+          "when": "view == syncView",
+          "group": "navigation@2"
+        }
       ],
       "view/item/context": [
-        { "command": "syncfiles.openScriptFile", "when": "view == syncView && viewItem == scriptItem", "group": "1_file@1", "title": "Open File" },
-        { "command": "syncfiles.runScriptDefault", "when": "view == syncView && viewItem == scriptItem", "group": "2_execution@1", "title": "Run (Default Method)" },
-        { "command": "syncfiles.runScriptInTerminal", "when": "view == syncView && viewItem == scriptItem", "group": "2_execution@2", "title": "Run in Terminal" },
-        { "command": "syncfiles.runScriptVSCodeAPI", "when": "view == syncView && viewItem == scriptItem", "group": "2_execution@3", "title": "Run with Background API" },
-        { "command": "syncfiles.editScriptDetails", "when": "view == syncView && viewItem == scriptItem", "group": "3_config@1", "title": "Configure Script..." },
-        { "command": "syncfiles.setScriptExecutionMode", "when": "view == syncView && viewItem == scriptItem", "group": "3_config@2", "title": "Set Default Execution Method..." },
-        { "title": "Set Left-Click Action...", "submenu": "syncfiles.scriptClickActionSubmenu", "when": "view == syncView && viewItem == scriptItem", "group": "3_config@3" },
-        { "command": "syncfiles.moveScriptToGroup", "when": "view == syncView && viewItem == scriptItem", "group": "4_org@1" },
-        { "command": "syncfiles.removeScriptFromGroup", "when": "view == syncView && viewItem == scriptItem", "group": "4_org@2" },
-        { "command": "syncfiles.addScriptToGroup", "when": "view == syncView && viewItem == scriptGroup", "group": "1_actions@1" },
-        { "command": "syncfiles.renameScriptGroup", "when": "view == syncView && viewItem == scriptGroup", "group": "2_manage@1" },
-        { "command": "syncfiles.deleteScriptGroup", "when": "view == syncView && viewItem == scriptGroup", "group": "2_manage@2" },
-        { "command": "syncfiles.createScriptGroup", "when": "view == syncView && viewItem == scriptsRoot", "group": "1_actions@1" }
+        {
+          "command": "syncfiles.openScriptFile",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "1_file@1",
+          "title": "Open File"
+        },
+        {
+          "command": "syncfiles.runScriptDefault",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "2_execution@1",
+          "title": "Run (Default Method)"
+        },
+        {
+          "command": "syncfiles.runScriptInTerminal",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "2_execution@2",
+          "title": "Run in Terminal"
+        },
+        {
+          "command": "syncfiles.runScriptVSCodeAPI",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "2_execution@3",
+          "title": "Run with Background API"
+        },
+        {
+          "command": "syncfiles.editScriptDetails",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "3_config@1",
+          "title": "Configure Script..."
+        },
+        {
+          "command": "syncfiles.setScriptExecutionMode",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "3_config@2",
+          "title": "Set Default Execution Method..."
+        },
+        {
+          "title": "Set Left-Click Action...",
+          "submenu": "syncfiles.scriptClickActionSubmenu",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "3_config@3"
+        },
+        {
+          "command": "syncfiles.moveScriptToGroup",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "4_org@1"
+        },
+        {
+          "command": "syncfiles.removeScriptFromGroup",
+          "when": "view == syncView && viewItem == scriptItem",
+          "group": "4_org@2"
+        },
+        {
+          "command": "syncfiles.addScriptToGroup",
+          "when": "view == syncView && viewItem == scriptGroup",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "syncfiles.renameScriptGroup",
+          "when": "view == syncView && viewItem == scriptGroup",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "syncfiles.deleteScriptGroup",
+          "when": "view == syncView && viewItem == scriptGroup",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "syncfiles.createScriptGroup",
+          "when": "view == syncView && viewItem == scriptsRoot",
+          "group": "1_actions@1"
+        }
       ],
       "syncfiles.scriptClickActionSubmenu": [
-        { "command": "syncfiles.setClickAction.doNothing", "group": "1_select@1" },
-        { "command": "syncfiles.setClickAction.openFile", "group": "1_select@2" },
-        { "command": "syncfiles.setClickAction.executeDefault", "group": "1_select@3" }
+        {
+          "command": "syncfiles.setClickAction.doNothing",
+          "group": "1_select@1"
+        },
+        {
+          "command": "syncfiles.setClickAction.openFile",
+          "group": "1_select@2"
+        },
+        {
+          "command": "syncfiles.setClickAction.executeDefault",
+          "group": "1_select@3"
+        }
       ]
     },
     "viewsContainers": {
-      "activitybar": [{ "id": "sync-container", "title": "SyncFiles", "icon": "media/icon.svg" }]
+      "activitybar": [
+        {
+          "id": "sync-container",
+          "title": "SyncFiles",
+          "icon": "media/icon.svg"
+        }
+      ]
     },
     "views": {
-      "sync-container": [{ "id": "syncView", "name": "Sync Control & Scripts" }]
+      "sync-container": [
+        {
+          "id": "syncView",
+          "name": "Sync Control & Scripts"
+        }
+      ]
     }
   },
   "scripts": {
@@ -103,11 +284,21 @@
     "lint": "eslint src --ext ts",
     "test": "vscode-test"
   },
-  "dependencies": { "adm-zip": "^0.5.10", "jsonc-parser": "^3.3.1" },
+  "dependencies": {
+    "adm-zip": "^0.5.10",
+    "jsonc-parser": "^3.3.1"
+  },
   "devDependencies": {
-    "@types/mocha": "^10.0.10", "@types/node": "20.x", "@types/vscode": "^1.75.0",
-    "@typescript-eslint/eslint-plugin": "^8.22.0", "@typescript-eslint/parser": "^8.22.0",
-    "@vscode/test-cli": "^0.0.10", "@vscode/test-electron": "^2.4.1",
-    "eslint": "^9.19.0", "typescript": "^5.8.2"
+    "@types/js-yaml": "^4.0.9",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.19.0",
+    "js-yaml": "^4.1.0",
+    "typescript": "^5.8.2"
   }
 }

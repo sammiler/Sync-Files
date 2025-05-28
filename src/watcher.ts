@@ -1,48 +1,58 @@
-// watcher.ts
+// src/watcher.ts
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-// MODIFIED: Added getConfigFilePath to imports
 import { getPythonScriptPath, getWatchEntries, getPythonExecutablePath, WatchEntry, getConfigFilePath } from './config';
-import { executePythonScript } from './python';
+import { executePythonScript } from './python'; // 确保 executePythonScript 能正确处理错误，不阻塞 watcher
 
+// 将 activeWatchers 移到模块级别，使其在 startWatching 和 stopWatching 之间共享
 const activeWatchers: Map<string, vscode.FileSystemWatcher> = new Map();
 
-function addWatcherInstance(key: string, watcher: vscode.FileSystemWatcher) {
-    console.log(`[Watcher DEBUG] addWatcherInstance called for key: ${key}`);
+function addWatcherInstance(
+    key: string,
+    watcher: vscode.FileSystemWatcher,
+    context?: vscode.ExtensionContext // 可选的 context 用于注册 dispose
+) {
     if (activeWatchers.has(key)) {
-        console.log(`[Watcher DEBUG] Disposing existing watcher for key: ${key}`);
+        console.log(`[Watcher] Disposing existing watcher for key: ${key}`);
         activeWatchers.get(key)?.dispose();
     }
     activeWatchers.set(key, watcher);
-    console.log(`[Watcher DEBUG] New watcher set for key: ${key}`);
+    console.log(`[Watcher] New watcher set for key: ${key}`);
+
+    // 如果提供了 context，将 watcher 的 dispose 方法添加到 context.subscriptions
+    // 这样当插件停用时，VS Code 会自动调用 watcher.dispose()
+    if (context) {
+        context.subscriptions.push({ dispose: () => watcher.dispose() });
+    }
 }
 
-export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => void): void {
+export function startWatching(
+    workspacePath: string,
+    onTreeRefreshNeeded: () => void,
+    context?: vscode.ExtensionContext // 接收 context
+): void {
     console.log(`[Watcher] startWatching called. Workspace: ${workspacePath}`);
-    stopWatching(); // Clears all existing watchers before creating new ones
+    stopWatching(); // 清理所有现有的 watcher
 
-    // 1. Watch Python Scripts Directory for Tree View updates (existing logic)
+    const workspaceUri = vscode.Uri.file(workspacePath);
+
+    // 1. 监视 Python 脚本目录以更新树视图
     const treeViewScriptDirPath = getPythonScriptPath(workspacePath);
-    console.log(`[Watcher] Config - TreeView Script Dir Path: "${treeViewScriptDirPath}"`);
     if (treeViewScriptDirPath) {
         const absoluteTreeViewScriptDirPath = path.resolve(workspacePath, treeViewScriptDirPath);
-        console.log(`[Watcher] Resolved TreeView Script Dir Absolute Path: "${absoluteTreeViewScriptDirPath}"`);
         if (fs.existsSync(absoluteTreeViewScriptDirPath) && fs.statSync(absoluteTreeViewScriptDirPath).isDirectory()) {
             const scriptDirWatcher = vscode.workspace.createFileSystemWatcher(
-                new vscode.RelativePattern(absoluteTreeViewScriptDirPath, '**/*.py')
+                new vscode.RelativePattern(vscode.Uri.file(absoluteTreeViewScriptDirPath), '**/*.py')
             );
-            console.log(`[Watcher] Created FileSystemWatcher for TreeView scripts: Pattern base "${absoluteTreeViewScriptDirPath}", pattern "**/*.py"`);
-
             const onChangeHandler = (uri?: vscode.Uri) => {
-                const eventUri = uri ? uri.fsPath : 'N/A';
-                console.log(`[Watcher Event] Change detected in Python script directory: ${absoluteTreeViewScriptDirPath}. Event URI: ${eventUri}. Triggering tree refresh.`);
+                console.log(`[Watcher Event] Python script directory change detected (${uri?.fsPath || 'N/A'}). Triggering tree refresh.`);
                 onTreeRefreshNeeded();
             };
             scriptDirWatcher.onDidChange(onChangeHandler);
             scriptDirWatcher.onDidCreate(onChangeHandler);
             scriptDirWatcher.onDidDelete(onChangeHandler);
-            addWatcherInstance('treeViewScriptsDirWatcher', scriptDirWatcher);
+            addWatcherInstance('treeViewScriptsDirWatcher', scriptDirWatcher, context);
             console.log(`[Watcher] Watching script directory for tree view: ${absoluteTreeViewScriptDirPath}`);
         } else {
             console.warn(`[Watcher] TreeView Script directory does not exist or is not a directory: ${absoluteTreeViewScriptDirPath}`);
@@ -51,80 +61,53 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
         console.log('[Watcher] No Python script directory configured for tree view watching.');
     }
 
-    // 2. Watch specific paths for deletion events (and other events) (existing logic)
+    // 2. 监视配置中定义的 watchEntries
     const watchEntries = getWatchEntries(workspacePath);
-    console.log(`[Watcher] Config - Watch Entries: ${JSON.stringify(watchEntries, null, 2)}`);
     const pythonExecutable = getPythonExecutablePath(workspacePath);
-    console.log(`[Watcher] Config - Python Executable Path: "${pythonExecutable}"`);
-
-    if (!pythonExecutable && watchEntries.some(entry => entry.onEventScript)) {
-        console.warn('[Watcher] Python executable path not configured. Watchers that trigger Python scripts might not function.');
-    }
-    if (!watchEntries || watchEntries.length === 0) {
-        console.log('[Watcher] No custom watch entries configured.');
-    }
 
     watchEntries.forEach((entry: WatchEntry, index: number) => {
-        console.log(`[Watcher] Processing Watch Entry #${index}: Path="${entry.watchedPath}", Script="${entry.onEventScript}"`);
         if (!entry.watchedPath) {
             console.warn(`[Watcher] Watch Entry #${index} has no watchedPath configured. Skipping.`);
             return;
         }
         const absoluteWatchedPath = path.resolve(workspacePath, entry.watchedPath);
-        console.log(`[Watcher] Entry #${index} - Resolved Watched Absolute Path: "${absoluteWatchedPath}"`);
-        
         let absoluteOnEventScriptPath: string | undefined = undefined;
         if (entry.onEventScript) {
             absoluteOnEventScriptPath = path.resolve(workspacePath, entry.onEventScript);
-            console.log(`[Watcher] Entry #${index} - Resolved Script Absolute Path: "${absoluteOnEventScriptPath}"`);
         }
 
         if (!fs.existsSync(absoluteWatchedPath)) {
             console.warn(`[Watcher] Entry #${index} - Watched path does not exist, cannot watch: ${absoluteWatchedPath}`);
             return;
         }
-        if (entry.onEventScript) {
-            if (!pythonExecutable) {
-                console.warn(`[Watcher] Entry #${index} - Cannot run script for ${absoluteWatchedPath}: Python executable not set.`);
-            }
-            if (absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
-                console.warn(`[Watcher] Entry #${index} - Script path does not exist for ${absoluteWatchedPath}: ${absoluteOnEventScriptPath}`);
-            }
-        }
-        
+
         let globPattern: vscode.GlobPattern;
         let isDirectoryWatch = false;
         try {
             const stats = fs.statSync(absoluteWatchedPath);
-            const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(absoluteWatchedPath));
-            if (!workspaceFolder) {
-                 console.warn(`[Watcher] Entry #${index} - Cannot create watcher: Path ${absoluteWatchedPath} is not within an open workspace folder.`);
+            const workspaceFolderForEntry = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(absoluteWatchedPath));
+            if (!workspaceFolderForEntry) {
+                 console.warn(`[Watcher] Entry #${index} - Path ${absoluteWatchedPath} is not within an open workspace folder.`);
                  return;
             }
             if (stats.isDirectory()) {
                 isDirectoryWatch = true;
-                const watchedDirUri = vscode.Uri.file(absoluteWatchedPath);
-                globPattern = new vscode.RelativePattern(watchedDirUri, '**');
-                console.log(`[Watcher] Entry #${index} - Setting up DIRECTORY watch. Base URI: ${watchedDirUri.toString()}, Pattern: "**"`);
+                globPattern = new vscode.RelativePattern(vscode.Uri.file(absoluteWatchedPath), '**');
             } else {
-                const watchedFileDirUri = vscode.Uri.file(path.dirname(absoluteWatchedPath));
-                const watchedFileName = path.basename(absoluteWatchedPath);
-                globPattern = new vscode.RelativePattern(watchedFileDirUri, watchedFileName);
-                console.log(`[Watcher] Entry #${index} - Setting up FILE watch. Base URI: ${watchedFileDirUri.toString()}, Pattern: "${watchedFileName}"`);
+                globPattern = new vscode.RelativePattern(vscode.Uri.file(path.dirname(absoluteWatchedPath)), path.basename(absoluteWatchedPath));
             }
         } catch(e) {
-            console.error(`[Watcher] Entry #${index} - Error stating path ${absoluteWatchedPath} or processing for glob: `, e);
+            console.error(`[Watcher] Entry #${index} - Error processing path ${absoluteWatchedPath} for glob: `, e);
             return;
         }
 
-        const watcherKey = `pathWatcher_${entry.watchedPath.replace(/[/\\]/g, '_')}`;
-        const pathWatcher = vscode.workspace.createFileSystemWatcher(globPattern, false, false, false);
-        console.log(`[Watcher] Entry #${index} - Created FileSystemWatcher with key ${watcherKey}. Base: "${globPattern.baseUri.toString()}", Pattern: "${globPattern.pattern}"`);
-
+        const pathWatcher = vscode.workspace.createFileSystemWatcher(globPattern, false, false, false); // ignoreCreateEvents, ignoreChangeEvents, ignoreDeleteEvents
         const handleFileSystemEvent = async (eventType: string, uri: vscode.Uri) => {
-            console.log(`[Watcher Event] ${eventType} detected by watcher for base "${globPattern.baseUri.toString()}" with pattern "${globPattern.pattern}". Event URI: ${uri.fsPath}. Configured watch: ${entry.watchedPath}`);
+            console.log(`[Watcher Event] For entry '${entry.watchedPath}': ${eventType} detected at ${uri.fsPath}.`);
+            // 简单的目录检查（如果需要更精确的匹配，可以使用minimatch等库）
             if (isDirectoryWatch && !uri.fsPath.startsWith(absoluteWatchedPath + path.sep) && uri.fsPath !== absoluteWatchedPath) {
-                console.log(`[Watcher Event] ${eventType} URI ${uri.fsPath} is outside watched directory ${absoluteWatchedPath}. Glob: pattern "${globPattern.pattern}", base "${globPattern.baseUri.toString()}". Ignoring script call based on this check.`);
+                // console.log(`[Watcher Event] Event URI ${uri.fsPath} is outside watched directory ${absoluteWatchedPath}. Ignoring script call.`);
+                // return; // 这个判断可能过于严格，因为父目录的事件也可能相关
             }
             if (entry.onEventScript && pythonExecutable && absoluteOnEventScriptPath && fs.existsSync(absoluteOnEventScriptPath)) {
                 try {
@@ -136,55 +119,91 @@ export function startWatching(workspacePath: string, onTreeRefreshNeeded: () => 
                 } catch (err) {
                     console.error(`[Watcher] Error executing script for ${eventType} on ${uri.fsPath}:`, err);
                 }
-            } else if (entry.onEventScript && !pythonExecutable) {
-                console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Python executable not set.`);
-            } else if (entry.onEventScript && absoluteOnEventScriptPath && !fs.existsSync(absoluteOnEventScriptPath)) {
-                 console.warn(`[Watcher] Cannot run script for ${eventType} on ${uri.fsPath}: Script ${entry.onEventScript} not found.`);
             }
         };
         pathWatcher.onDidCreate((uri) => handleFileSystemEvent("CREATION", uri));
         pathWatcher.onDidChange((uri) => handleFileSystemEvent("MODIFICATION", uri));
         pathWatcher.onDidDelete((uri) => handleFileSystemEvent("DELETION", uri));
-        addWatcherInstance(watcherKey, pathWatcher);
-        console.log(`[Watcher] Entry #${index} - Now watching for C/U/D on base: ${globPattern.baseUri.toString()}, pattern: ${globPattern.pattern} -> script: ${entry.onEventScript || 'None'}`);
+        addWatcherInstance(`watchEntry_${index}_${entry.watchedPath.replace(/[/\\]/g, '_')}`, pathWatcher, context);
+        console.log(`[Watcher] Entry #${index} - Now watching ${absoluteWatchedPath} -> script: ${entry.onEventScript || 'None'}`);
     });
 
-    // --- NEW SECTION: Watch the syncfiles.json config file itself ---
-    const configFilePathString = getConfigFilePath(workspacePath);
-    const configFileUri = vscode.Uri.file(configFilePathString);
-    console.log(`[Watcher] Attempting to watch config file: ${configFileUri.fsPath}`);
 
-    // Create a FileSystemWatcher for the specific config file.
-    // The base for RelativePattern should be the directory containing the file (.vscode).
-    // The pattern is the filename (syncfiles.json).
-    const configFileWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(vscode.Uri.file(path.dirname(configFileUri.fsPath)), path.basename(configFileUri.fsPath))
-    );
-    console.log(`[Watcher] Created FileSystemWatcher for config file: ${configFileUri.fsPath}`);
+    // 3. 监视 syncfiles.json 文件本身
+    const configFilePathString = getConfigFilePath(workspacePath); // 从 config.ts 导入
+    const configFileDirectoryUri = vscode.Uri.file(path.dirname(configFilePathString));
+    const configFileName = path.basename(configFilePathString);
 
-    const handleConfigFileChange = (eventType: string, uri: vscode.Uri) => {
-        console.log(`[Watcher Event] Config file ${uri.fsPath} ${eventType}. Triggering full refresh.`);
-        // The onTreeRefreshNeeded callback should handle reading the new config and updating the UI.
-        // This callback is typically: async () => { await vscode.commands.executeCommand('syncfiles.refreshTreeView'); }
-        // which in turn calls refreshAndSyncConfig, which reads the config file.
-        onTreeRefreshNeeded();
-    };
+    // 只有当 .vscode 目录存在时才监视 syncfiles.json (因为它是其父目录)
+    // 如果 .vscode 目录不存在，那么 syncfiles.json 也不存在，这个 watcher 没有意义
+    if (fs.existsSync(configFileDirectoryUri.fsPath)) {
+        console.log(`[Watcher] Attempting to watch config file: Dir='${configFileDirectoryUri.fsPath}', File='${configFileName}'`);
+        const configFileWatcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(configFileDirectoryUri, configFileName)
+        );
 
-    configFileWatcher.onDidChange((uri) => handleConfigFileChange("changed (onDidChange)", uri));
-    configFileWatcher.onDidCreate((uri) => handleConfigFileChange("created (onDidCreate)", uri));
-    configFileWatcher.onDidDelete((uri) => handleConfigFileChange("deleted (onDidDelete)", uri));
+        const handleConfigFileChange = (eventType: string, uri: vscode.Uri) => {
+            console.log(`[Watcher Event] Config file ${uri.fsPath} ${eventType}. Triggering full refresh.`);
+            onTreeRefreshNeeded();
+        };
 
-    addWatcherInstance('configFileWatcher_syncfiles.json', configFileWatcher); // Using a specific and unique key
-    console.log(`[Watcher] Now watching config file for C/U/D: ${configFileUri.fsPath}`);
-    // --- END NEW SECTION ---
+        configFileWatcher.onDidChange((uri) => handleConfigFileChange("changed", uri));
+        configFileWatcher.onDidCreate((uri) => handleConfigFileChange("created", uri));
+        configFileWatcher.onDidDelete((uri) => handleConfigFileChange("deleted", uri));
+
+        addWatcherInstance('configFileWatcher_syncfiles.json', configFileWatcher, context);
+        console.log(`[Watcher] Now watching config file for C/U/D: ${configFilePathString}`);
+    } else {
+        console.log(`[Watcher] Directory for config file (${configFileDirectoryUri.fsPath}) does not exist. Not watching syncfiles.json directly.`);
+    }
+
+    // 4. 监视 .vscode 目录本身的删除
+    // 这个 watcher 的 base 是 workspacePath, pattern 是 ".vscode"
+    const dotVscodeDirPath = path.join(workspacePath, ".vscode");
+    // 只有当 .vscode 目录在启动时存在，才监视它的删除。
+    // 如果它之后被创建，这个 watcher 不会动态添加 (除非 startWatching 被重新调用)。
+    // 对于 .vscode 目录的创建，configFileWatcher 对 syncfiles.json 的 onDidCreate 应该能间接触发刷新。
+    if (fs.existsSync(dotVscodeDirPath)) {
+        const dotVscodeDirWatcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(workspaceUri, ".vscode") // 监视工作区根目录下的 ".vscode" 这个条目
+            // 注意：这个glob pattern `.vscode` 只会匹配名为 `.vscode` 的文件或目录。
+            // 如果想匹配 `.vscode` 目录下的所有内容，应该是 `new vscode.RelativePattern(vscode.Uri.file(dotVscodeDirPath), '**')`
+            // 但我们这里主要关心 `.vscode` 目录本身的删除。
+        );
+
+        dotVscodeDirWatcher.onDidDelete(uri => {
+            // 确保被删除的是 .vscode 目录本身
+            if (normalizeFsPath(uri.fsPath) === normalizeFsPath(dotVscodeDirPath)) {
+                console.log(`[Watcher Event] .vscode directory itself deleted: ${uri.fsPath}. Triggering full refresh.`);
+                onTreeRefreshNeeded(); // 触发刷新，因为配置文件肯定没了
+            }
+        });
+        // .vscode 目录的 onDidChange 和 onDidCreate 事件通常意义不大，因为我们更关心其内部文件的变化（由其他 watcher 处理）
+        // 或者它被删除的事件。
+        addWatcherInstance('dotVscodeDirectoryWatcher', dotVscodeDirWatcher, context);
+        console.log(`[Watcher] Now watching .vscode directory itself for deletion: ${dotVscodeDirPath}`);
+    } else {
+        console.log(`[Watcher] .vscode directory does not exist at startup, not watching it for deletion directly.`);
+        // 如果 .vscode 目录在插件启动时不存，之后被创建了，
+        // 那么 `configFileWatcher` (如果它的父目录存在) 对 `syncfiles.json` 的 `onDidCreate` 事件应该会触发刷新。
+    }
 }
 
 export function stopWatching(): void {
     console.log('[Watcher] stopWatching called.');
     activeWatchers.forEach((watcher, key) => {
-        watcher.dispose();
-        console.log(`[Watcher] Stopped and disposed watcher: ${key}`);
+        try {
+            watcher.dispose(); // 正确调用 dispose
+            console.log(`[Watcher] Disposed watcher: ${key}`);
+        } catch (e) {
+            console.error(`[Watcher] Error disposing watcher ${key}:`, e);
+        }
     });
     activeWatchers.clear();
     console.log('[Watcher] All active watchers cleared.');
+}
+
+// 辅助函数，用于规范化路径以进行比较（可选，但有时有用）
+function normalizeFsPath(fsPath: string): string {
+    return path.normalize(fsPath).toLowerCase(); // 根据需要调整规范化级别
 }
