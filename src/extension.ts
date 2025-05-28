@@ -4,7 +4,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as yaml from 'js-yaml'; // For parsing YAML
 import * as https from 'https';   // For downloading YAML file
-
+// At the top of src/extension.ts
+import { generateAndSaveTasksJson } from './tasksGenerator'; // Adjust path if you place it elsewhere
 import { FetchVscodeRepoViewProvider, ScriptGroupTreeItem, ScriptItemTreeItem } from './view';
 import { syncAllMappings, fetchDirectory } from './sync';
 import { startWatching, stopWatching } from './watcher';
@@ -259,6 +260,13 @@ export async function activate(context: vscode.ExtensionContext) {
                     pythonExecutablePathToSave,
                     watchEntriesToSave
                 );
+            await vscode.commands.executeCommand('syncfiles.refreshTreeView');
+            // Generate tasks.json using the now-updated configuration
+            progress.report({ message: '正在生成 tasks.json...' });
+            await generateAndSaveTasksJson(workspacePath); // Call the new function
+
+            progress.report({ message: '工作流加载完成，配置已更新，tasks.json 已生成！' });
+            vscode.window.showInformationMessage('工作流加载成功！配置已更新，tasks.json 已生成。旧文件已备份。');
 
                 progress.report({ message: '工作流加载完成，配置已更新！' });
                 vscode.window.showInformationMessage('工作流加载成功！配置已更新，旧配置已备份。');
