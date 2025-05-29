@@ -20,7 +20,7 @@ import {
     updateScriptInGroupAndSave,
     ScriptGroupConfig, ScriptItemConfig,
     Config, getAllAssignedScriptPaths,
-    getEnvVars,
+    getEnvVars, // Make sure this returns a Map or is handled appropriately
     Mapping, EnvVar, WatchEntry,
     getMappings, getWatchEntries,
     saveCoreSettings,
@@ -28,7 +28,7 @@ import {
     saveFullConfig,
     DEFAULT_SCRIPT_GROUP_ID,
     synchronizeConfigWithFileSystem,
-    getConfigFilePath // Make sure this is exported and imported
+    getConfigFilePath
 } from './config';
 import { generateUUID, normalizePath, ensureAbsolute } from './utils';
 
@@ -39,7 +39,7 @@ let viewProviderInstance: FetchVscodeRepoViewProvider | undefined;
 interface WorkflowPlatformConfig {
     sourceUrl?: string;
     targetDir?: string;
-    mappings?: Mapping[];
+    mappings?: Mapping[]; // Added mappings here
     envVariables?: Record<string, string>;
     pythonScriptPath?: string;
     pythonExecutablePath?: string;
@@ -88,19 +88,53 @@ async function fetchYamlContent(url: string): Promise<string> {
     });
 }
 
-async function refreshAndSyncConfig(workspacePath: string): Promise<void> {
-    let currentConfig = readConfig(workspacePath);
-    const changed = synchronizeConfigWithFileSystem(currentConfig, workspacePath);
-    if (changed) {
-        await saveFullConfig(workspacePath, currentConfig);
+
+// Centralized refresh logic
+async function doRefreshAndSync(workspacePath: string, context?: vscode.ExtensionContext): Promise<void> {
+    console.log("[SyncFiles] Executing doRefreshAndSync (core refresh logic)...");
+    if (!workspacePath) {
+        console.warn("[SyncFiles] doRefreshAndSync called without workspacePath.");
+        return;
     }
+    let currentConfig = readConfig(workspacePath); // Read fresh config
+    const changed = synchronizeConfigWithFileSystem(currentConfig, workspacePath); // Syncs scripts with file system
+
+    if (changed) {
+        console.log("[SyncFiles] Config changed during sync, saving via saveFullConfig...");
+        await saveFullConfig(workspacePath, currentConfig); // saveFullConfig should only save, not trigger other actions
+    }
+
     if (viewProviderInstance) {
         viewProviderInstance.refresh();
+        console.log("[SyncFiles] View provider refreshed by doRefreshAndSync.");
+    } else {
+        console.warn("[SyncFiles] viewProviderInstance not available for refresh in doRefreshAndSync.");
+    }
+
+    // Re-initialize watchers with potentially new config (pythonScriptPath, watchEntries)
+    // The callback for the watcher will execute 'syncfiles.refreshTreeView' which in turn calls this function.
+    // Pass context to startWatching if it needs it for subscriptions.
+    if (context) {
+        console.log("[SyncFiles] Re-evaluating watchers after doRefreshAndSync.");
+        startWatching(workspacePath, async () => {
+            console.log("[SyncFiles Callback] Watcher detected change, triggering 'syncfiles.refreshTreeView' command.");
+            await vscode.commands.executeCommand('syncfiles.refreshTreeView');
+        }, context); // Pass context
+    } else {
+         // If context is not available (e.g. called from a place where context isn't passed),
+         // we might need a slightly different way to setup the watcher or accept that
+         // watcher re-initialization here won't re-add to context.subscriptions.
+         // For now, we assume context is available when this critical refresh happens.
+         // Fallback if context is absolutely not available (less ideal as watcher won't be in subscriptions):
+         console.warn("[SyncFiles] Watcher re-evaluation skipped in doRefreshAndSync due to missing context. Watchers might not reflect latest config changes until next activation or explicit refresh with context.");
+         // Or, if startWatching doesn't strictly need context for its core functionality:
+         // startWatching(workspacePath, async () => { /* ... */ });
     }
 }
 
+
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('Extension "SyncFiles" activated!');
+    console.log('Extension "SyncFiles" activating...');
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
         vscode.window.showErrorMessage('SyncFiles: Please open a workspace first.');
@@ -108,31 +142,34 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     const workspacePath = workspaceFolders[0].uri.fsPath;
 
-    await refreshAndSyncConfig(workspacePath);
-
+    // 1. Initialize View Provider (reads config, doesn't execute commands)
     viewProviderInstance = new FetchVscodeRepoViewProvider(workspacePath);
     treeViewInstance = vscode.window.createTreeView('syncView', { treeDataProvider: viewProviderInstance });
     context.subscriptions.push(treeViewInstance);
+    console.log("[Activate] View provider initialized.");
+
+    // 2. ⭐ Register all commands FIRST ⭐
+    console.log("[Activate] Registering commands...");
 
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.refreshTreeView', async () => {
-        await refreshAndSyncConfig(workspacePath);
-        if (viewProviderInstance) { // Ensure view provider refreshes if config was already in sync
-            viewProviderInstance.refresh();
-        }
+        console.log("[Command: syncfiles.refreshTreeView] Invoked.");
+        await doRefreshAndSync(workspacePath, context); // Pass context here
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.syncAll', async () => {
         try {
-            await syncAllMappings(workspacePath);
+            await syncAllMappings(workspacePath); // This function likely reads config directly
             vscode.window.showInformationMessage('SyncFiles: Synchronization complete!');
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             vscode.window.showErrorMessage('SyncFiles: Synchronization failed: ' + msg);
         }
+        // After sync, refresh the tree view as underlying data might have changed
+        await vscode.commands.executeCommand('syncfiles.refreshTreeView');
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.openSettings', () => {
-        registerSettingsWebview(context, workspacePath);
+        registerSettingsWebview(context, workspacePath); // This function displays a webview
     }));
 
     // --- "Load Workflow" Command Implementation ---
@@ -158,13 +195,12 @@ export async function activate(context: vscode.ExtensionContext) {
         const confirmation = await vscode.window.showWarningMessage(
             `加载此工作流 (${path.basename(yamlUrl)}) 将执行以下操作：\n` +
             `1. 如果 YAML 中定义了 'sourceUrl' 和 'targetDir'，将下载或覆盖这些文件/目录。\n` +
-            `2. 使用 YAML 中的值更新 SyncFiles 的 Python路径、环境变量和监控条目设置。\n` +
+            `2. 使用 YAML 中的值更新 SyncFiles 的 Mappings, Python路径、环境变量和监控条目设置。\n` +
             `3. 脚本列表和分组将根据新的脚本路径设置自动刷新。\n\n` +
             `您当前的 SyncFiles 配置文件 (syncfiles.json) 将被备份为 syncfiles.json.bak。\n` +
             `是否继续加载？`,
             { modal: true },
-            "继续加载",
-            "取消"
+            "继续加载", "取消"
         );
 
         if (confirmation !== "继续加载") {
@@ -178,18 +214,18 @@ export async function activate(context: vscode.ExtensionContext) {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: '正在加载工作流',
-            cancellable: false
+            cancellable: false // Consider cancellable: true and handle cancellationToken
         }, async (progress) => {
             try {
                 if (fs.existsSync(configFilePath)) {
                     fs.copyFileSync(configFilePath, backupConfigPath);
-                    progress.report({ message: '当前配置已备份到 syncfiles.json.bak' });
+                    progress.report({ increment: 10, message: '当前配置已备份到 syncfiles.json.bak' });
                 }
 
-                progress.report({ message: '正在获取工作流配置...' });
+                progress.report({ increment: 10, message: '正在获取工作流配置...' });
                 const yamlContent = await fetchYamlContent(yamlUrl);
 
-                progress.report({ message: '正在解析 YAML 配置...' });
+                progress.report({ increment: 10, message: '正在解析 YAML 配置...' });
                 const workflowConfigRoot = yaml.load(yamlContent) as WorkflowRootConfig;
 
                 if (!workflowConfigRoot || typeof workflowConfigRoot !== 'object' || !workflowConfigRoot.platforms) {
@@ -207,7 +243,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
 
                 if (platformYamlConfig.sourceUrl && platformYamlConfig.targetDir) {
-                    progress.report({ message: `正在从 ${platformYamlConfig.sourceUrl} 下载文件...` });
+                    progress.report({ increment: 20, message: `正在从 ${platformYamlConfig.sourceUrl} 下载文件...` });
                     const absoluteTargetDir = ensureAbsolute(platformYamlConfig.targetDir, workspacePath);
                     const parentOfTargetDir = path.dirname(absoluteTargetDir);
                     if (!fs.existsSync(parentOfTargetDir)) {
@@ -217,31 +253,34 @@ export async function activate(context: vscode.ExtensionContext) {
                         fs.mkdirSync(absoluteTargetDir, { recursive: true });
                     }
                     await fetchDirectory(platformYamlConfig.sourceUrl, absoluteTargetDir, workspacePath);
-                    vscode.window.showInformationMessage(`文件已从 ${platformYamlConfig.sourceUrl} 下载到 ${platformYamlConfig.targetDir}`);
+                    // vscode.window.showInformationMessage(`文件已从 ${platformYamlConfig.sourceUrl} 下载到 ${platformYamlConfig.targetDir}`); // Less verbose during progress
                 }
 
-                progress.report({ message: '正在更新本地 SyncFiles 配置...' });
+                progress.report({ increment: 10, message: '正在更新本地 SyncFiles 配置...' });
 
-                const currentDiskConfig = readConfig(workspacePath);
+                const currentDiskConfig = readConfig(workspacePath); // Read current config on disk
+                
+                // Mappings: Use YAML if defined, otherwise keep existing
                 const mappingsToSave: Mapping[] = platformYamlConfig.mappings !== undefined
-                    ? platformYamlConfig.mappings  // 如果 YAML 中定义了 mappings，则使用它
-                    : currentDiskConfig.mappings; 
+                    ? platformYamlConfig.mappings
+                    : currentDiskConfig.mappings;
 
+                // Env Vars: Start with existing, then update/add from YAML
                 const envVarsMap = new Map<string, string>();
                 (currentDiskConfig.envVars || []).forEach(ev => envVarsMap.set(ev.key, ev.value));
-
                 if (platformYamlConfig.envVariables) {
                     for (const key in platformYamlConfig.envVariables) {
                         if (Object.prototype.hasOwnProperty.call(platformYamlConfig.envVariables, key)) {
                             let value = platformYamlConfig.envVariables[key];
                             if (key === 'PROJECT_DIR' && (value === '.' || value === './' || value === '.\\')) {
-                                value = ensureAbsolute('', workspacePath);
+                                value = ensureAbsolute('', workspacePath); // Resolve . to workspace absolute path
                             }
                             envVarsMap.set(key, value);
                         }
                     }
                 }
 
+                // Other settings: Use YAML if defined, otherwise keep existing
                 const pythonScriptPathToSave = platformYamlConfig.pythonScriptPath !== undefined
                     ? platformYamlConfig.pythonScriptPath
                     : currentDiskConfig.pythonScriptPath;
@@ -252,6 +291,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     ? platformYamlConfig.watchEntries
                     : currentDiskConfig.watchEntries;
 
+                // Save the core settings derived from YAML + existing config
                 await saveCoreSettings(
                     workspacePath,
                     mappingsToSave,
@@ -259,18 +299,16 @@ export async function activate(context: vscode.ExtensionContext) {
                     pythonScriptPathToSave,
                     pythonExecutablePathToSave,
                     watchEntriesToSave
-                );
-            await vscode.commands.executeCommand('syncfiles.refreshTreeView');
-            // Generate tasks.json using the now-updated configuration
-            progress.report({ message: '正在生成 tasks.json...' });
-            await generateAndSaveTasksJson(workspacePath); // Call the new function
+                ); // This function now only saves, doesn't trigger refresh.
 
-            progress.report({ message: '工作流加载完成，配置已更新，tasks.json 已生成！' });
-            vscode.window.showInformationMessage('工作流加载成功！配置已更新，tasks.json 已生成。旧文件已备份。');
+                // Generate tasks.json using the now-updated configuration
+                progress.report({ increment: 20, message: '正在生成 tasks.json...' });
+                await generateAndSaveTasksJson(workspacePath);
 
-                progress.report({ message: '工作流加载完成，配置已更新！' });
-                vscode.window.showInformationMessage('工作流加载成功！配置已更新，旧配置已备份。');
+                progress.report({ increment: 20, message: '工作流加载完成！' });
+                vscode.window.showInformationMessage('工作流加载成功！配置已更新，tasks.json 已生成。旧配置已备份。');
 
+                // After all operations, trigger a full refresh
                 await vscode.commands.executeCommand('syncfiles.refreshTreeView');
 
             } catch (error: any) {
@@ -284,6 +322,10 @@ export async function activate(context: vscode.ExtensionContext) {
     }));
 
     // --- Other Command Registrations (Script Management, UI, etc.) ---
+    // (Copy-paste your existing command registrations for openScriptFile, executeScriptSharedLogic, runScript*,
+    // createScriptGroup, renameScriptGroup, deleteScriptGroup, addScriptToGroup, editScriptDetails,
+    // setScriptExecutionMode, removeScriptFromGroup, moveScriptToGroup, setClickAction* here)
+    // For brevity, I'm showing one example, assuming they call 'syncfiles.refreshTreeView' where needed
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.openScriptFile', async (item?: ScriptItemTreeItem | vscode.Uri) => {
         let uriToOpen: vscode.Uri | undefined;
         if (item instanceof ScriptItemTreeItem) uriToOpen = item.resourceUri;
@@ -303,7 +345,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         if (itemOrPath instanceof ScriptItemTreeItem) {
             scriptName = (itemOrPath.label as string) || path.basename(itemOrPath.scriptConfig.path);
-            const pythonScriptDirSetting = getPythonScriptPath(workspacePath); // This is from syncfiles.json
+            const pythonScriptDirSetting = getPythonScriptPath(workspacePath);
             const scriptDir = ensureAbsolute(pythonScriptDirSetting, workspacePath);
             scriptPathForExecution = normalizePath(path.resolve(scriptDir, itemOrPath.scriptConfig.path));
         } else if (typeof itemOrPath === 'string') {
@@ -339,8 +381,13 @@ export async function activate(context: vscode.ExtensionContext) {
             }
             if (!terminal) {
                 const env: { [key: string]: string | undefined } = { ...process.env };
-                // getEnvVars from config.ts returns a Map
-                (await getEnvVars(workspacePath)).forEach((v, k) => { env[k] = v; });
+                // getEnvVars from config.ts should return a Map
+                const configEnvVars = await getEnvVars(workspacePath); // Ensure this returns Map<string, string>
+                if (configEnvVars instanceof Map) {
+                    configEnvVars.forEach((v, k) => { env[k] = v; });
+                } else if (Array.isArray(configEnvVars)) { // Fallback if it returns EnvVar[]
+                    (configEnvVars as { key: string; value: string }[]).forEach(e => env[e.key] = e.value);
+                }
                 terminal = vscode.window.createTerminal({ name: termName, env, cwd: workspacePath });
             }
             const quotedExec = resolvedPythonExecutable.includes(' ') && !resolvedPythonExecutable.startsWith('"') ? `"${resolvedPythonExecutable}"` : resolvedPythonExecutable;
@@ -369,7 +416,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 let cfg=readConfig(workspacePath);
                 const g=cfg.scriptGroups.find(x=>x.id===DEFAULT_SCRIPT_GROUP_ID);
                 if(g)g.scripts=[];
-                await saveFullConfig(workspacePath,cfg);
+                await saveFullConfig(workspacePath,cfg); // saveFullConfig calls sync which might re-add if dir is set
             }
         } else {
             const c=await vscode.window.showWarningMessage(`Delete group "${i.groupConfig.name}"? Scripts inside will become unassigned.`,{modal:true},"Delete Group");
@@ -383,7 +430,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if(targetItemOrContext instanceof ScriptGroupTreeItem) {
             targetGroupId=targetItemOrContext.groupConfig.id;
         } else {
-            const groups=getScriptGroups(workspacePath).map(g=>({label:g.name,id:g.id,description:g.id===DEFAULT_SCRIPT_GROUP_ID?"(Default)":`(${(g.scripts||[]).length})`}));
+            const groups=(await getScriptGroups(workspacePath)).map(g=>({label:g.name,id:g.id,description:g.id===DEFAULT_SCRIPT_GROUP_ID?"(Default)":`(${(g.scripts||[]).length})`}));
             if(!groups.length){vscode.window.showInformationMessage("No groups exist.");return;}
             const chosenGroup=await vscode.window.showQuickPick(groups,{placeHolder:"Select group"});
             if(!chosenGroup)return;
@@ -424,7 +471,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.moveScriptToGroup', async (i:ScriptItemTreeItem) => {
         if(!(i instanceof ScriptItemTreeItem))return;
         const s=i.scriptConfig;const sgid=i.parentGroupConfig.id;
-        const ags=getScriptGroups(workspacePath).filter(g=>g.id!==sgid).map(g=>({label:g.name,id:g.id}));
+        const ags=(await getScriptGroups(workspacePath)).filter(g=>g.id!==sgid).map(g=>({label:g.name,id:g.id}));
         if(!ags.length){vscode.window.showInformationMessage("No other groups.");return;}
         const pg=await vscode.window.showQuickPick(ags,{placeHolder:"Select new group"});
         if(!pg)return;
@@ -445,6 +492,7 @@ export async function activate(context: vscode.ExtensionContext) {
         try {
             await vscode.workspace.getConfiguration('syncfiles.view').update('scriptClickAction', action, vscode.ConfigurationTarget.Workspace);
             vscode.window.showInformationMessage(`Script left-click action set to: '${action}'.`);
+            // This change will be picked up by onDidChangeConfiguration listener if it affects the view
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to set click action: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -453,21 +501,27 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.setClickAction.openFile', () => setScriptClickAction('openFile')));
     context.subscriptions.push(vscode.commands.registerCommand('syncfiles.setClickAction.executeDefault', () => setScriptClickAction('executeDefault')));
 
-    startWatching(workspacePath, async () => {
-        await vscode.commands.executeCommand('syncfiles.refreshTreeView');
-    },context);
+    console.log("[Activate] All commands registered.");
 
+    // 3. Perform initial configuration sync and UI refresh by calling the registered command
+    console.log("[Activate] Performing initial configuration sync and UI refresh by calling 'syncfiles.refreshTreeView' command.");
+    await vscode.commands.executeCommand('syncfiles.refreshTreeView'); // This will call doRefreshAndSync
+
+    // 4. Set up listeners for VS Code configuration changes (these also call the registered command)
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
         const affects = (key: string) => event.affectsConfiguration(`syncfiles.${key}`);
-        // Check for VS Code level settings that might affect the extension's behavior
         if (affects('scripts.defaultGroupName') || affects('view.scriptClickAction')) {
+            console.log("[SyncFiles] Relevant VS Code setting changed, triggering 'syncfiles.refreshTreeView' command.");
             await vscode.commands.executeCommand('syncfiles.refreshTreeView');
         }
-        // Note: Changes directly to syncfiles.json are handled by the watcher in watcher.ts
+        // Note: Changes directly to syncfiles.json are handled by its own FileSystemWatcher
+        // which is set up by `startWatching` (called within `doRefreshAndSync`).
     }));
+
+    console.log('Extension "SyncFiles" activation complete.');
 }
 
 export function deactivate() {
     console.log('Extension "SyncFiles" deactivated.');
-    stopWatching();
+    stopWatching(); // Clean up watchers
 }

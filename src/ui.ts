@@ -79,6 +79,8 @@ export function registerSettingsWebview(context: vscode.ExtensionContext, worksp
 
 
                     await saveCoreSettings(workspacePath,mappings, envVars, pythonScriptPath, pythonExecutablePath, watchEntries);
+                    console.log('[UI Save] Settings saved, now triggering refreshTreeView command.');
+                    await vscode.commands.executeCommand('syncfiles.refreshTreeView');
                     vscode.window.showInformationMessage('Settings saved successfully!');
                     panel.dispose(); // 保存后关闭面板
                 } catch (err) {

@@ -139,9 +139,6 @@ export async function saveFullConfig(workspacePath: string, config: Config): Pro
         fs.mkdirSync(path.dirname(configPath), { recursive: true });
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
         
-        startWatching(workspacePath, async () => { 
-            await vscode.commands.executeCommand('syncfiles.refreshTreeView'); 
-        });
     } catch (err) { 
         throw new Error(`Failed to save config to ${configPath}: ${(err as Error).message}`); 
     }
@@ -160,7 +157,6 @@ export async function saveCoreSettings(workspacePath: string, mappings: Mapping[
     synchronizeConfigWithFileSystem(currentConfig, workspacePath); // This mutates currentConfig
 
     await saveFullConfig(workspacePath, currentConfig); 
-    await vscode.commands.executeCommand('syncfiles.refreshTreeView');
 }
 
 export function readConfig(workspacePath: string): Config {
